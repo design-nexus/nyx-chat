@@ -32,7 +32,7 @@ const SPEC: Spec = Spec {
             name: "Chat",
             icon: "io.github.design_nexus.nyx.Chat",
             version: env!("CARGO_PKG_VERSION"),
-            description: "Chat with local models through llama.cpp or Ollama, with tools and a model marketplace.",
+            description: "Chat with local models through Nyx AI Core or Ollama, with tools and a model marketplace.",
             licence: "MIT",
             website: "https://github.com/design-nexus/nyx-chat",
             issues: "https://github.com/design-nexus/nyx-chat/issues",

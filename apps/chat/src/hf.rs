@@ -12,7 +12,6 @@ use std::time::Duration;
 
 use crate::util::{encode_path, encode_query};
 
-pub mod download;
 
 /// Projectors and speculative drafters are companion files, not chat models.
 pub fn auxiliary_gguf(path: &str) -> bool {

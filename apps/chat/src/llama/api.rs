@@ -1,9 +1,11 @@
-//! llama.cpp router and OpenAI-compatible API.
+//! llama.cpp hosts: this computer's is Nyx AI Core (`core`); other machines
+//! are reached through the router's OpenAI-compatible API.
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 use std::time::Duration;
 
+use super::core;
 use crate::ollama::api::{self, Conn, Installed, ModelInfo, Progress, Running};
 
 async fn list(conn: &Conn, reload: bool) -> Result<Vec<Value>> {
@@ -18,11 +20,17 @@ fn named<'a>(list: &'a [Value], name: &str) -> Option<&'a Value> {
 }
 
 pub async fn version(conn: &Conn) -> Result<String> {
+    if core::local(conn) {
+        return core::version().await;
+    }
     api::check(conn.get("/health").timeout(Duration::from_secs(3)).send().await?).await?;
     Ok("llama.cpp".into())
 }
 
 pub async fn tags(conn: &Conn) -> Result<Vec<Installed>> {
+    if core::local(conn) {
+        return core::tags().await;
+    }
     let mut models: Vec<Installed> = list(conn, false).await?.iter().filter_map(|item| {
         let name = item["id"].as_str()?.to_string();
         if item["status"]["value"].as_str() == Some("downloading") { return None; }
@@ -37,25 +45,10 @@ pub async fn tags(conn: &Conn) -> Result<Vec<Installed>> {
     Ok(models)
 }
 
-pub async fn reload_if_idle(conn: &Conn, names: &[String]) -> Result<bool> {
-    let models = list(conn, false).await?;
-    for name in names {
-        let Some(item) = named(&models, name) else { continue; };
-        match item["status"]["value"].as_str() {
-            Some("loading" | "downloading") => return Ok(false),
-            Some("loaded") => {
-                let url = format!("/props?model={}", crate::util::encode_query(name));
-                let props: Value = api::check(conn.get(&url).timeout(Duration::from_secs(5)).send().await?).await?.json().await?;
-                if props["default_generation_settings"]["is_processing"].as_bool() != Some(false) { return Ok(false); }
-            }
-            _ => {}
-        }
-    }
-    list(conn, true).await?;
-    Ok(true)
-}
-
 pub async fn running(conn: &Conn) -> Result<Vec<Running>> {
+    if core::local(conn) {
+        return core::running().await;
+    }
     Ok(list(conn, false).await?.iter().filter(|item| item["status"]["value"].as_str() == Some("loaded"))
         .filter_map(|item| Some(Running { name: item["id"].as_str()?.into(),
             size: item["size"].as_u64().unwrap_or(0), size_vram: 0, expires: String::new() })).collect())
@@ -81,13 +74,12 @@ fn info(item: &Value) -> ModelInfo {
 }
 
 pub async fn show(conn: &Conn, model: &str) -> Result<ModelInfo> {
+    if core::local(conn) {
+        return core::show(model).await;
+    }
     let entries = list(conn, false).await?;
     let item = named(&entries, model).context("model isn't installed")?;
     let mut result = info(item);
-    if conn.url == "http://127.0.0.1:8080" && crate::hf::download::cached_auxiliary_model(model) {
-        result.capabilities = vec!["draft".into()];
-        return Ok(result);
-    }
     if item["status"]["value"].as_str() == Some("loaded") {
         let url = format!("/props?model={}", crate::util::encode_query(model));
         if let Ok(raw) = conn.get(&url).timeout(Duration::from_secs(5)).send().await
@@ -112,23 +104,35 @@ pub async fn show(conn: &Conn, model: &str) -> Result<ModelInfo> {
 }
 
 pub async fn delete(conn: &Conn, model: &str) -> Result<()> {
+    if core::local(conn) {
+        return core::delete(model).await;
+    }
     let url = format!("/models?model={}", crate::util::encode_query(model));
     api::check(conn.auth(api::client().delete(conn.url(&url))).send().await?).await?;
     Ok(())
 }
 
 pub async fn unload(conn: &Conn, model: &str) -> Result<()> {
+    if core::local(conn) {
+        return core::unload(model).await;
+    }
     api::check(conn.post("/models/unload").json(&json!({"model": model})).send().await?).await?;
     Ok(())
 }
 
-pub async fn preload(conn: &Conn, model: &str) -> Result<()> {
+/// Load a model; `keep` holds it loaded on this computer until it's unloaded.
+pub async fn preload(conn: &Conn, model: &str, keep: bool) -> Result<()> {
+    if core::local(conn) {
+        return core::preload(model, keep).await;
+    }
     api::check(conn.post("/models/load").json(&json!({"model": model})).timeout(Duration::from_secs(300)).send().await?).await?;
     Ok(())
 }
 
 pub async fn embed(conn: &Conn, model: &str, inputs: &[String]) -> Result<Vec<Vec<f32>>> {
-    ensure_embedding_preset(conn, model).await?;
+    if core::local(conn) {
+        return core::embed(model, inputs).await;
+    }
     let response = api::check(conn.post("/v1/embeddings").json(&json!({"model": model, "input": inputs}))
         .timeout(Duration::from_secs(300)).send().await?).await?;
     let body: Value = response.json().await?;
@@ -140,28 +144,10 @@ pub async fn embed(conn: &Conn, model: &str, inputs: &[String]) -> Result<Vec<Ve
     Ok(vectors)
 }
 
-async fn ensure_embedding_preset(conn: &Conn, model: &str) -> Result<()> {
-    if conn.url != "http://127.0.0.1:8080" { return Ok(()); }
-    if model.contains(['\n', '\r', '[', ']']) { bail!("invalid embedding model name"); }
-    let path = crate::llama::presets::path()?;
-    let mut content = std::fs::read_to_string(&path).unwrap_or_else(|_| "version = 1\n".into());
-    if let Some(start) = content.lines().position(|line| line.trim() == format!("[{model}]")) {
-        let lines: Vec<&str> = content.lines().collect();
-        let end = (start + 1..lines.len()).find(|i| lines[*i].trim().starts_with('[')).unwrap_or(lines.len());
-        if lines[start + 1..end].iter().any(|line| line.trim() == "embeddings = true") { return Ok(()); }
-        let mut updated: Vec<String> = lines.iter().map(|line| (*line).to_string()).collect();
-        updated.insert(end, "embeddings = true".into());
-        content = updated.join("\n") + "\n";
-    } else {
-        content.push_str(&format!("\n[{model}]\nembeddings = true\n"));
-    }
-    std::fs::write(path, content)?;
-    let _ = unload(conn, model).await;
-    let _ = list(conn, true).await?;
-    Ok(())
-}
-
 pub async fn complete(conn: &Conn, model: &str, messages: Value) -> Result<String> {
+    if core::local(conn) {
+        return core::complete(model, messages).await;
+    }
     let response = api::check(conn.post("/v1/chat/completions")
         .json(&json!({"model": model, "messages": messages, "stream": false}))
         .timeout(Duration::from_secs(120)).send().await?).await?;
@@ -171,10 +157,8 @@ pub async fn complete(conn: &Conn, model: &str, messages: Value) -> Result<Strin
 
 pub async fn pull(conn: &Conn, model: &str, tx: async_channel::Sender<Progress>) -> Result<()> {
     let canonical = model.rsplit_once(':').map(|(repo, tag)| format!("{repo}:{}", crate::hf::quant_tag(tag))).unwrap_or_else(|| model.to_string());
-    if conn.url == "http://127.0.0.1:8080" {
-        crate::hf::download::download(&canonical, &tx).await?;
-        let _ = list(conn, true).await;
-        return Ok(());
+    if core::local(conn) {
+        return core::pull(&canonical, tx).await;
     }
     let reply: Value = api::check(conn.post("/models").json(&json!({"model": canonical})).send().await?).await?.json().await?;
     if reply["success"].as_bool() == Some(false) {
@@ -206,32 +190,48 @@ pub async fn pull(conn: &Conn, model: &str, tx: async_channel::Sender<Progress>)
     }
 }
 
+/// `running`, `on demand` (the socket waits for the first app) or `stopped`.
 pub fn service_state() -> String {
-    crate::cmd::output(&["systemctl", "--user", "is-active", "nyx-llama-server"]).unwrap_or_else(|| "inactive".into())
+    let active = |unit: &str| crate::cmd::output(&["systemctl", "--user", "is-active", unit]).is_some_and(|s| s.trim() == "active");
+    if active("nyx-aid.service") {
+        "running".into()
+    } else if active("nyx-aid.socket") {
+        "on demand".into()
+    } else {
+        "stopped".into()
+    }
 }
 
 pub fn local_service() -> bool {
     let host = crate::prefs::get().host();
     host.backend == crate::prefs::Backend::LlamaCpp
-        && crate::prefs::normalize_host(&host.url, host.backend) == "http://127.0.0.1:8080"
+        && crate::prefs::normalize_host(&host.url, host.backend) == core::URL
 }
 
 pub fn service_enabled() -> bool {
-    crate::cmd::output(&["systemctl", "--user", "is-enabled", "nyx-llama-server.service"])
+    crate::cmd::output(&["systemctl", "--user", "is-enabled", "nyx-aid.socket"])
         .is_some_and(|s| s.trim() == "enabled")
 }
 
 pub fn set_service_enabled(enabled: bool) -> Result<()> {
-    crate::cmd::run(&["systemctl", "--user", if enabled { "enable" } else { "disable" }, "--now", "nyx-llama-server.service"]).map(|_| ())
+    if enabled {
+        crate::cmd::run(&["systemctl", "--user", "enable", "--now", "nyx-aid.socket"]).map(|_| ())
+    } else {
+        crate::cmd::run(&["systemctl", "--user", "disable", "--now", "nyx-aid.socket"])?;
+        crate::cmd::run(&["systemctl", "--user", "stop", "nyx-aid.service"]).map(|_| ())
+    }
 }
 
 pub fn installed() -> bool {
-    crate::cmd::present("llama-server") || std::env::var_os("HOME")
-        .is_some_and(|home| std::path::PathBuf::from(home).join(".local/lib/nyx-chat/llama.cpp/llama-server").exists())
+    core::installed()
 }
 
 pub fn control(action: &str) -> Result<String> {
-    if !matches!(action, "start" | "stop" | "restart") { bail!("unknown service action {action}"); }
-    crate::cmd::run(&["systemctl", "--user", action, "nyx-llama-server"])?;
-    Ok(format!("{} llama.cpp", if action == "start" { "Started" } else if action == "stop" { "Stopped" } else { "Restarted" }))
+    match action {
+        "start" => crate::cmd::run(&["systemctl", "--user", "start", "nyx-aid.socket", "nyx-aid.service"])?,
+        "stop" => crate::cmd::run(&["systemctl", "--user", "stop", "nyx-aid.service", "nyx-aid.socket"])?,
+        "restart" => crate::cmd::run(&["systemctl", "--user", "restart", "nyx-aid.service"])?,
+        _ => bail!("unknown service action {action}"),
+    };
+    Ok(format!("{} Nyx AI Core", if action == "start" { "Started" } else if action == "stop" { "Stopped" } else { "Restarted" }))
 }

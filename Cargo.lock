@@ -1379,6 +1379,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "nyx-ai-client"
+version = "0.1.0"
+source = "git+https://github.com/design-nexus/nyx-ai.git?rev=1dd816e3a82b09cdc3e2300300e3b2efcb9e0540#1dd816e3a82b09cdc3e2300300e3b2efcb9e0540"
+dependencies = [
+ "libc",
+ "nyx-ai-proto",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "nyx-ai-proto"
+version = "0.1.0"
+source = "git+https://github.com/design-nexus/nyx-ai.git?rev=1dd816e3a82b09cdc3e2300300e3b2efcb9e0540#1dd816e3a82b09cdc3e2300300e3b2efcb9e0540"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "nyx-chat"
 version = "0.1.0"
 dependencies = [
@@ -1389,6 +1409,7 @@ dependencies = [
  "futures-util",
  "gtk4",
  "libc",
+ "nyx-ai-client",
  "nyx-core",
  "nyx-theme",
  "nyx-ui",

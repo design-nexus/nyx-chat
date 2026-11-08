@@ -94,7 +94,9 @@ pub fn start(name: &str) {
 pub fn cancel(id: u64) {
     let target = PULLS.with(|p| p.borrow().iter().find(|x| x.id == id && x.active()).map(|x| (x.name.clone(), x.conn.clone())));
     if let Some((name, conn)) = target {
-        if conn.backend == crate::prefs::Backend::LlamaCpp && conn.url != "http://127.0.0.1:8080" {
+        if crate::llama::core::local(&conn) {
+            rt::spawn(async move { crate::llama::core::cancel_pull(&name).await }, |_| models::refresh());
+        } else if conn.backend == crate::prefs::Backend::LlamaCpp {
             rt::spawn(async move { api::unload(&conn, &name).await }, |_| models::refresh());
         }
     }

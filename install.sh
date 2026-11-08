@@ -349,8 +349,19 @@ MANIFEST
   fi
 done
 
+# Chat's local models run in Nyx AI Core (design-nexus/nyx-ai); retire the
+# llama.cpp server Chat used to install for itself.
+if [[ -f $config/systemd/user/nyx-llama-server.service ]]; then
+  systemctl --user disable --now nyx-llama-server.service 2>/dev/null || true
+  rm -f "$config/systemd/user/nyx-llama-server.service"
+  systemctl --user daemon-reload 2>/dev/null || true
+  say "Retired Chat's own llama.cpp server; Nyx AI Core runs local models now"
+fi
+# Nyx AI Core's installer takes Chat's copy of the build; drop it once it has.
+[[ -f $HOME/.local/lib/nyx-ai/llama.cpp/.release ]] && rm -rf "$HOME/.local/lib/nyx-chat/llama.cpp"
+[[ -x $bin/nyx-aid ]] || command -v nyx-aid >/dev/null || warn "Chat's local models need Nyx AI Core: install it from https://github.com/design-nexus/nyx-ai"
+
 # The suite's own command: nyx list, install, update, uninstall.
-bash "$src/apps/chat/scripts/install-llama.sh"
 [[ -x $bin/nyx ]] || install -m 755 "$src/bin/nyx" "$bin/nyx"
 
 update-desktop-database "$desk" 2>/dev/null || true

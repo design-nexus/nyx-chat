@@ -2,14 +2,14 @@
 Type=Application
 Name=Chat
 GenericName=AI Chat
-Comment=Chat with local models through Ollama, with tools, web search and a model marketplace
+Comment=Chat with local models, with tools, web search and a model marketplace
 Exec=nyx-chat
 Icon=io.github.design_nexus.nyx.Chat
 Terminal=false
 StartupNotify=true
 StartupWMClass=io.github.design_nexus.nyx.Chat
 Categories=Utility;Development;GTK;
-Keywords=ollama;llm;ai;chat;model;assistant;huggingface;gguf;local;
+Keywords=llama.cpp;ollama;llm;ai;chat;model;assistant;huggingface;gguf;local;
 Actions=new;quick;models;marketplace;
 
 [Desktop Action new]

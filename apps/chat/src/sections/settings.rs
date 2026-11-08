@@ -32,50 +32,41 @@ pub fn build(page: &Page) {
 
 fn local_server_settings(page: &Page) {
     if !crate::llama::api::installed() { return; }
-    let g = page.group("Local llama.cpp");
+    let g = page.group("Local models (Nyx AI Core)");
     let p = prefs::get();
     let (r, _) = widgets::choice_row(
         "Models kept loaded",
-        "More loaded models switch faster but use more memory.",
+        "More loaded models switch faster but use more memory. Shared by every Nyx app.",
         widgets::opts(&[("1", "One"), ("2", "Two"), ("4", "Four")]),
         &p.llama_models_max.to_string(),
-        |v| prefs::update(|p| p.llama_models_max = v.parse().unwrap_or(1)),
+        |v| {
+            prefs::update(|p| p.llama_models_max = v.parse().unwrap_or(1));
+            apply_local_service();
+        },
     );
     g.add(&r);
     let (r, _) = widgets::choice_row(
         "Sleep after inactivity",
-        "Unload idle models from memory. The server stays available and reloads a model for the next request.",
+        "Unload idle models from memory. A model loads again for the next request.",
         widgets::opts(&[("-1", "Never"), ("300", "5 minutes"), ("900", "15 minutes"), ("3600", "1 hour")]),
         &p.llama_idle_seconds.to_string(),
-        |v| prefs::update(|p| p.llama_idle_seconds = v.parse().unwrap_or(-1)),
-    );
-    g.add(&r);
-    let (r, _) = widgets::button_row(
-        "Apply server settings",
-        "Applies loaded model count and idle sleep by restarting the local server. Active chats will be interrupted.",
-        "Apply",
-        |b| {
-            if crate::pulls::active_count() > 0 {
-                window::toast("Wait for model downloads to finish before restarting llama.cpp");
-                return;
-            }
-            if crate::llama::api::service_state().trim() != "active" {
-                window::toast("Settings will apply when llama.cpp starts");
-                return;
-            }
-            b.set_sensitive(false);
-            let b2 = b.clone();
-            crate::cmd::background(|| crate::llama::api::control("restart"), move |result| {
-                b2.set_sensitive(true);
-                match result {
-                    Ok(message) => window::toast(&message),
-                    Err(e) => window::toast(&format!("Couldn't restart llama.cpp: {e:#}")),
-                }
-                models::refresh();
-            });
+        |v| {
+            prefs::update(|p| p.llama_idle_seconds = v.parse().unwrap_or(-1));
+            apply_local_service();
         },
     );
     g.add(&r);
+}
+
+/// Nyx AI Core takes these at once; nothing restarts.
+fn apply_local_service() {
+    let p = prefs::get();
+    let (max, idle) = (p.llama_models_max, p.llama_idle_seconds);
+    crate::rt::spawn(async move { crate::llama::core::configure_service(max, idle).await }, |r| {
+        if let Err(e) = r {
+            window::toast(&format!("Couldn't change Nyx AI Core: {}", crate::ollama::api::short_error(&format!("{e:#}"))));
+        }
+    });
 }
 
 fn hugging_face(page: &Page) {
@@ -112,7 +103,7 @@ fn hugging_face(page: &Page) {
 
 fn hugging_face_dialog(refresh: impl Fn() + Clone + 'static) {
     let (dialog, card) = widgets::dialog("Connect to Hugging Face", 460);
-    let hint = widgets::label("Paste a Hugging Face read token. Create one at huggingface.co/settings/tokens. It is stored in a private file for the local llama.cpp service.", "dim");
+    let hint = widgets::label("Paste a Hugging Face read token. Create one at huggingface.co/settings/tokens. It is stored in a private file; Nyx AI Core uses it for downloads.", "dim");
     hint.set_wrap(true);
     card.append(&hint);
     let token = gtk::Entry::new();
@@ -140,7 +131,7 @@ fn hugging_face_dialog(refresh: impl Fn() + Clone + 'static) {
             button.set_sensitive(true);
             match result {
                 Ok((name, value)) => match hf::save_token(&value) {
-                    Ok(()) => { refresh(); d.close(); window::toast(&format!("Connected to Hugging Face as {name}. Restart llama.cpp to use this token for downloads.")); },
+                    Ok(()) => { refresh(); d.close(); window::toast(&format!("Connected to Hugging Face as {name}.")); },
                     Err(e) => window::toast(&format!("Couldn't save Hugging Face token: {e:#}")),
                 },
                 Err(e) => window::toast(&format!("Hugging Face login failed: {e:#}")),
@@ -265,7 +256,14 @@ fn connection(page: &Page) {
                     util::esc(&prefs::normalize_host(&h.url, h.backend)),
                     if h.key.is_empty() { "" } else { " · with a key" }
                 );
-                list.append(&widgets::row(&format!("{} · {}", h.name, if h.backend == Backend::LlamaCpp { "llama.cpp" } else { "Ollama" }), &desc, Some(controls.upcast_ref())));
+                let kind = if h.backend == Backend::Ollama {
+                    "Ollama"
+                } else if prefs::normalize_host(&h.url, h.backend) == crate::llama::core::URL {
+                    "Nyx AI Core"
+                } else {
+                    "llama.cpp"
+                };
+                list.append(&widgets::row(&format!("{} · {kind}", h.name), &desc, Some(controls.upcast_ref())));
             }
         })
     };
@@ -319,7 +317,7 @@ fn connection(page: &Page) {
             let enabled = sw.is_active();
             match crate::llama::api::set_service_enabled(enabled) {
                 Ok(()) => {
-                    window::toast(if enabled { "llama.cpp will start at login" } else { "llama.cpp stopped and won't start at login" });
+                    window::toast(if enabled { "Nyx AI Core starts when an app needs it" } else { "Nyx AI Core stopped and won't start for apps" });
                     rs();
                     models::refresh();
                 }
@@ -327,11 +325,11 @@ fn connection(page: &Page) {
                     updating2.set(true);
                     sw.set_active(!enabled);
                     updating2.set(false);
-                    window::toast(&format!("Couldn't change llama.cpp service: {e:#}"));
+                    window::toast(&format!("Couldn't change Nyx AI Core: {e:#}"));
                 }
             }
         });
-        g.add(&widgets::row("Run llama.cpp at login", "Also starts it now. Turning this off stops the server; Start below runs it for this session.", Some(auto.upcast_ref())));
+        g.add(&widgets::row("Start Nyx AI Core for apps", "It starts when Chat or another Nyx app first needs a model. Turning this off stops it; Start below runs it for this session.", Some(auto.upcast_ref())));
         for action in ["start", "stop", "restart"] {
             let b = gtk::Button::with_label(&format!("{}{}", action[..1].to_uppercase(), &action[1..]));
             let rs = refresh_state.clone();
@@ -353,7 +351,7 @@ fn connection(page: &Page) {
             });
             controls.append(&b);
         }
-        g.add(&widgets::row("llama.cpp on this computer", "Local model service, also available to coding tools.", Some(controls.upcast_ref())));
+        g.add(&widgets::row("Nyx AI Core on this computer", "The local model service Nyx apps share (llama.cpp).", Some(controls.upcast_ref())));
     }
 }
 
@@ -464,7 +462,7 @@ fn chat_defaults(page: &Page) {
     });
     let (r, _) = widgets::switch_row(
         "Keep the picked model loaded",
-        "Preload the picked model for faster replies. Local llama.cpp may unload it after the idle time set above.",
+        "Preload the picked model for faster replies and keep it loaded on this computer.",
         p.keep_loaded,
         |on| {
             prefs::update(|p| p.keep_loaded = on);
@@ -508,7 +506,7 @@ fn chat_defaults(page: &Page) {
         (1.0, 100.0, 1.0), p.top_k as f64, 0, |v| prefs::update(|p| p.top_k = v as i64));
     let (r, _) = widgets::choice_row(
         "Context length",
-        "How much of the conversation the model keeps in mind. The local llama.cpp server uses this after Apply server settings; more uses more memory.",
+        "How much of the conversation the model keeps in mind. On this computer it applies the next time the model loads; more uses more memory.",
         widgets::opts(&[
             ("4096", "4K tokens"),
             ("8192", "8K tokens"),

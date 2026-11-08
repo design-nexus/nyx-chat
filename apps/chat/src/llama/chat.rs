@@ -64,6 +64,9 @@ fn body(req: &Request) -> Value {
 
 pub async fn stream_once(req: &Request, tx: &async_channel::Sender<Event>, cancel: &Cancel)
     -> Result<(String, String, Vec<ToolCall>, Stats)> {
+    if super::core::local(&req.conn) {
+        return super::core::stream_once(req, tx, cancel).await;
+    }
     let started = Instant::now();
     let response = api::check(req.conn.post("/v1/chat/completions").json(&body(req)).send().await?).await?;
     let mut stream = response.bytes_stream();

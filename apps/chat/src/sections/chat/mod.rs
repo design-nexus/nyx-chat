@@ -669,7 +669,7 @@ pub(crate) fn refresh_banners(p: &Page) {
                 && crate::prefs::normalize_host(&host.url, host.backend).contains("127.0.0.1");
             let b = widgets::banner(&unreachable_markup(), true);
             if local && crate::llama::api::installed() {
-                let start = gtk::Button::with_label("Start llama.cpp");
+                let start = gtk::Button::with_label("Start Nyx AI Core");
                 start.set_valign(gtk::Align::Center);
                 start.connect_clicked(|b| {
                     b.set_sensitive(false);
@@ -678,7 +678,7 @@ pub(crate) fn refresh_banners(p: &Page) {
                         |r| {
                             match r {
                                 Ok(m) => window::toast(&m),
-                                Err(e) => window::toast(&format!("Couldn't start llama.cpp: {e}")),
+                                Err(e) => window::toast(&format!("Couldn't start Nyx AI Core: {e}")),
                             }
                             models::refresh();
                         },
@@ -686,7 +686,7 @@ pub(crate) fn refresh_banners(p: &Page) {
                 });
                 b.append(&start);
             } else if local {
-                b.append(&widgets::label("Install the llama.cpp service from Chat's installer.", "dim"));
+                b.append(&widgets::label("Install Nyx AI Core, the shared local model service, from its installer.", "dim"));
             }
             p.banners.append(&b);
         }

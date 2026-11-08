@@ -1,10 +1,10 @@
 # Chat
 
-A desktop chat client for [PrismML llama.cpp](https://github.com/PrismML-Eng/llama.cpp) and optional [Ollama](https://ollama.com), built with GTK 4. It chats with
+A desktop chat client for [Nyx AI Core](https://github.com/design-nexus/nyx-ai) (the suite's shared llama.cpp runtime) and optional [Ollama](https://ollama.com), built with GTK 4. It chats with
 local models, lets them use tools such as web search, and downloads GGUF models from Hugging Face. It takes its colors
 from your [Omarchy](https://omarchy.org) theme and fits a half-screen tile.
 
-Chat uses a local llama.cpp service by default. The service keeps running when Chat closes, so coding tools can use its OpenAI compatible API.
+Chat uses Nyx AI Core on this computer by default. It loads, schedules and downloads models for every Nyx app; Chat keeps its own chats, prompts and knowledge bases.
 
 ## What it does
 
@@ -107,10 +107,10 @@ o.window({ title = "^Quick ask$" }, { float = true, center = true, size = { 720,
 To remove it, run the same line with `uninstall.sh` in place of `install.sh`. Add
 `-s -- --purge` to also remove its settings and chat history.
 
-The installer includes a pinned PrismML llama.cpp CUDA server and installs a user service. In Chat's Connection settings, use **Run llama.cpp at login** to enable it, or **Start** to run it for this session. Ollama is optional.
+Local models need [Nyx AI Core](https://github.com/design-nexus/nyx-ai): install it first. It starts when Chat first needs a model; Chat's Connection settings can stop, start or restart it. Updating Chat retires the llama.cpp server older versions installed. Ollama is optional.
 ### Coding tools
 
-The local server listens on `http://127.0.0.1:8080`. Point an OpenAI compatible client at base URL `http://127.0.0.1:8080/v1`, choose an installed model ID from `GET /v1/models`, and enter any placeholder API key if the client requires one. The service binds to localhost and remains available when Chat is closed. Chat does not change existing coding tool settings.
+Nyx AI Core serves an OpenAI-compatible API at `http://127.0.0.1:8080/v1`, the address Chat's server used before. Point a client there, choose a model ID from `GET /v1/models`, and enter any placeholder API key if the client requires one. It binds to localhost and starts on the first request, whether or not Chat is open.
 
 Optional: `wl-clipboard` (Quick ask with the selection), `grim` and `slurp`
 (screenshots), `poppler` (PDFs), `geoclue` (desktop location), whisper.cpp and Piper

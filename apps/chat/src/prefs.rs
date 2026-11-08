@@ -61,7 +61,7 @@ pub struct Host {
 
 impl Default for Host {
     fn default() -> Self {
-        Host { backend: Backend::LlamaCpp, name: "This computer · llama.cpp".into(), url: "http://127.0.0.1:8080".into(), key: String::new() }
+        Host { backend: Backend::LlamaCpp, name: "This computer".into(), url: "http://127.0.0.1:8080".into(), key: String::new() }
     }
 }
 
@@ -263,7 +263,13 @@ fn fix(p: &mut Prefs) -> bool {
         p.hosts.push(Host::default());
         return true;
     }
-    false
+    // The local host's old default name said llama.cpp; it's Nyx AI Core now.
+    let mut renamed = false;
+    for h in p.hosts.iter_mut().filter(|h| h.name == "This computer · llama.cpp") {
+        h.name = "This computer".into();
+        renamed = true;
+    }
+    renamed
 }
 
 /// Normalise what people type for a host: add the scheme and default port.

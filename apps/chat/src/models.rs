@@ -220,6 +220,7 @@ pub fn refresh() {
         async move {
             let tags = api::tags(&conn).await;
             let running = api::running(&conn).await.unwrap_or_default();
+            let vram = if crate::llama::core::local(&conn) { crate::llama::core::vram().await.ok() } else { None };
             let mut infos = Vec::new();
             if let Ok(list) = &tags {
                 let futs = list.iter().map(|m| {
@@ -229,9 +230,12 @@ pub fn refresh() {
                 });
                 infos = futures_util::future::join_all(futs).await;
             }
-            (tags, running, infos)
+            (tags, running, infos, vram)
         },
-        move |(tags, running, infos)| {
+        move |(tags, running, infos, vram)| {
+            if let Some(vram) = vram.filter(|v| *v > 0 && *v != prefs::get().vram_bytes) {
+                prefs::update(|p| p.vram_bytes = vram);
+            }
             let current = Conn::current();
             if (current.url, current.backend) != source {
                 STATE.with(|s| s.borrow_mut().refreshing = false);
@@ -299,7 +303,7 @@ fn initialize_model_presets(list: &[Installed]) {
             READY.with(|ready| ready.set(true));
             crate::llama::presets::mark(prefs::get().model_settings.keys().cloned());
         },
-        Err(e) => crate::window::toast(&format!("Couldn't save llama.cpp model settings: {e:#}")),
+        Err(e) => crate::window::toast(&format!("Couldn't send model settings to Nyx AI Core: {e:#}")),
     }
 }
 
