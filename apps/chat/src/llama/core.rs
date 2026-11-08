@@ -155,6 +155,16 @@ pub async fn pull(model: &str, tx: async_channel::Sender<Progress>) -> Result<()
     bail!("Nyx AI Core stopped reporting the download")
 }
 
+/// Ask Hugging Face now; the models with updates.
+pub async fn check_updates() -> Result<Vec<String>> {
+    Ok(client().check_updates().await.map_err(fail)?.into_iter().map(|m| m.id).collect())
+}
+
+/// Models AI Core already knows have updates (it checks daily).
+pub async fn known_updates() -> Result<Vec<String>> {
+    Ok(client().list_models().await.map_err(fail)?.into_iter().filter(|m| m.update_available).map(|m| m.id).collect())
+}
+
 pub async fn cancel_pull(model: &str) -> Result<()> {
     client().cancel_download(model).await.map_err(fail)
 }

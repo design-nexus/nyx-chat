@@ -291,7 +291,7 @@ fn fill_installed(g: &widgets::Group, list: &gtk::Box) {
             });
         });
     });
-    if prefs::get().host().backend == prefs::Backend::Ollama { head.append(&check); }
+    if prefs::get().host().backend == prefs::Backend::Ollama || crate::llama::api::local_service() { head.append(&check); }
     list.append(&head);
 
     if installed.is_empty() {

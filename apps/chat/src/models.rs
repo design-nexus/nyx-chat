@@ -221,6 +221,7 @@ pub fn refresh() {
             let tags = api::tags(&conn).await;
             let running = api::running(&conn).await.unwrap_or_default();
             let vram = if crate::llama::core::local(&conn) { crate::llama::core::vram().await.ok() } else { None };
+            let updates = if crate::llama::core::local(&conn) { crate::llama::core::known_updates().await.ok() } else { None };
             let mut infos = Vec::new();
             if let Ok(list) = &tags {
                 let futs = list.iter().map(|m| {
@@ -230,9 +231,9 @@ pub fn refresh() {
                 });
                 infos = futures_util::future::join_all(futs).await;
             }
-            (tags, running, infos, vram)
+            (tags, running, infos, vram, updates)
         },
-        move |(tags, running, infos, vram)| {
+        move |(tags, running, infos, vram, updates)| {
             if let Some(vram) = vram.filter(|v| *v > 0 && *v != prefs::get().vram_bytes) {
                 prefs::update(|p| p.vram_bytes = vram);
             }
@@ -266,6 +267,9 @@ pub fn refresh() {
                     if let Ok(i) = info {
                         s.info.insert(name, i);
                     }
+                }
+                if let Some(found) = updates {
+                    s.updates = found.into_iter().collect();
                 }
                 let names: HashSet<String> = s.installed.iter().map(|m| m.name.clone()).collect();
                 s.updates.retain(|n| names.contains(n));
@@ -356,6 +360,16 @@ pub fn refresh_running() {
 
 /// Compare every installed model with its registry. `done` gets how many can update.
 pub fn check_updates(done: impl FnOnce(usize) + 'static) {
+    if crate::llama::api::local_service() {
+        rt::spawn(crate::llama::core::check_updates(), move |r| {
+            let found: HashSet<String> = r.unwrap_or_default().into_iter().collect();
+            let n = found.len();
+            STATE.with(|s| s.borrow_mut().updates = found);
+            hub::emit(&hub::MODELS);
+            done(n);
+        });
+        return;
+    }
     if prefs::get().host().backend == prefs::Backend::LlamaCpp {
         done(0);
         return;
@@ -380,8 +394,11 @@ pub fn check_updates(done: impl FnOnce(usize) + 'static) {
     );
 }
 
-/// Once a day, quietly.
+/// Once a day, quietly. Nyx AI Core checks its own models.
 pub fn daily_update_check() {
+    if crate::llama::api::local_service() {
+        return;
+    }
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     if prefs::get().update_check_day != today && online() == Some(true) && !installed().is_empty() {
         check_updates(|n| {
