@@ -1381,7 +1381,7 @@ dependencies = [
 [[package]]
 name = "nyx-ai-client"
 version = "0.1.0"
-source = "git+https://github.com/design-nexus/nyx-ai.git?rev=01ab80596145f148aaee9766fa07c872cbb01e1f#01ab80596145f148aaee9766fa07c872cbb01e1f"
+source = "git+https://github.com/design-nexus/nyx-ai.git?rev=d0f202b873a9609a09dfa764f2bf45ed0097e736#d0f202b873a9609a09dfa764f2bf45ed0097e736"
 dependencies = [
  "libc",
  "nyx-ai-proto",
@@ -1392,7 +1392,7 @@ dependencies = [
 [[package]]
 name = "nyx-ai-proto"
 version = "0.1.0"
-source = "git+https://github.com/design-nexus/nyx-ai.git?rev=01ab80596145f148aaee9766fa07c872cbb01e1f#01ab80596145f148aaee9766fa07c872cbb01e1f"
+source = "git+https://github.com/design-nexus/nyx-ai.git?rev=d0f202b873a9609a09dfa764f2bf45ed0097e736#d0f202b873a9609a09dfa764f2bf45ed0097e736"
 dependencies = [
  "serde",
  "serde_json",

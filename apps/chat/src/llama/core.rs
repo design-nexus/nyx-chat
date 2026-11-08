@@ -160,6 +160,11 @@ pub async fn check_updates() -> Result<Vec<String>> {
     Ok(client().check_updates().await.map_err(fail)?.into_iter().map(|m| m.id).collect())
 }
 
+/// The model Nyx Settings set as the default for new chats.
+pub async fn default_chat_model() -> Result<Option<String>> {
+    Ok(client().service_settings().await.map_err(fail)?.defaults.get("chat").cloned())
+}
+
 /// Models AI Core already knows have updates (it checks daily).
 pub async fn known_updates() -> Result<Vec<String>> {
     Ok(client().list_models().await.map_err(fail)?.into_iter().filter(|m| m.update_available).map(|m| m.id).collect())

@@ -21,6 +21,8 @@ struct State {
     loading: Option<String>,
     /// The picked model was loaded after the first successful refresh.
     restored: bool,
+    /// Nyx AI Core's default chat model, for when Chat has no pick of its own.
+    shared_default: Option<String>,
 }
 
 thread_local! {
@@ -95,7 +97,8 @@ pub fn updates() -> Vec<String> {
 pub fn default_model() -> String {
     let p = prefs::get();
     let backend = p.host().backend;
-    let want = if p.new_chat_model.is_empty() { p.last_model } else { p.new_chat_model };
+    let shared = STATE.with(|s| s.borrow().shared_default.clone()).unwrap_or_default();
+    let want = [p.new_chat_model, p.last_model, shared].into_iter().find(|m| !m.is_empty()).unwrap_or_default();
     let chat = chat_models();
     if !want.is_empty() && chat.contains(&want) {
         return want;
@@ -222,6 +225,8 @@ pub fn refresh() {
             let running = api::running(&conn).await.unwrap_or_default();
             let vram = if crate::llama::core::local(&conn) { crate::llama::core::vram().await.ok() } else { None };
             let updates = if crate::llama::core::local(&conn) { crate::llama::core::known_updates().await.ok() } else { None };
+            let shared_default =
+                if crate::llama::core::local(&conn) { crate::llama::core::default_chat_model().await.ok().flatten() } else { None };
             let mut infos = Vec::new();
             if let Ok(list) = &tags {
                 let futs = list.iter().map(|m| {
@@ -231,9 +236,10 @@ pub fn refresh() {
                 });
                 infos = futures_util::future::join_all(futs).await;
             }
-            (tags, running, infos, vram, updates)
+            (tags, running, infos, vram, updates, shared_default)
         },
-        move |(tags, running, infos, vram, updates)| {
+        move |(tags, running, infos, vram, updates, shared_default)| {
+            STATE.with(|s| s.borrow_mut().shared_default = shared_default);
             if let Some(vram) = vram.filter(|v| *v > 0 && *v != prefs::get().vram_bytes) {
                 prefs::update(|p| p.vram_bytes = vram);
             }
