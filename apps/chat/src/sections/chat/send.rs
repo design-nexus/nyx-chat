@@ -434,7 +434,7 @@ fn prepare(p: &Page, model: &str, user_id: i64) -> Prepared {
                 .map(|k| {
                     let available = models::embedding_models();
                     let want = if k.model.is_empty() { &pr.embed_model } else { &k.model };
-                    (k.id, if available.contains(want) { want.clone() } else { available.first().cloned().unwrap_or_default() })
+                    (k.id, models::stand_in(want, &available, &format!("the knowledge base “{}”", k.name)))
                 })
         })
         .collect();
@@ -474,7 +474,7 @@ fn prepare(p: &Page, model: &str, user_id: i64) -> Prepared {
     {
         pr.embed_model.clone()
     } else {
-        embed_available.first().cloned().unwrap_or_default()
+        models::stand_in(&pr.embed_model, &embed_available, "searching long attachments")
     };
 
     Prepared {

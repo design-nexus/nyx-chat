@@ -80,7 +80,8 @@ Chat uses Nyx AI Core on this computer by default. It loads, schedules and downl
   [Piper](https://github.com/rhasspy/piper). Hands-free mode sends when you stop talking.
 - **Quick ask:** `nyx-chat --quick` opens a small window for one-off questions, optionally
   about the text you've highlighted or copied. **Open in chat** keeps the exchange.
-- **Several servers:** add llama.cpp or Ollama servers and switch between them at the foot of the sidebar. Chat never starts or stops Ollama.
+- **Several servers:** add llama.cpp or Ollama servers on other computers and switch between them at the foot of the sidebar. A llama.cpp address on this computer (`localhost` or `127.0.0.1`, any port) always means Nyx AI Core. Chat never starts or stops Ollama.
+- **No silent model swaps:** when a chat's model, Quick ask's or a knowledge base's embedding model isn't installed, Chat says so; it doesn't quietly use another.
 - **Import and export:** all chats as one JSON file, and imports from Open WebUI exports.
 
 ### Easy on the battery

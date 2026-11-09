@@ -437,10 +437,11 @@ pub fn build() -> gtk::Widget {
     let p2 = Rc::downgrade(&pg);
     hub::on(&hub::MODELS, &root, move || {
         if let Some(p) = p2.upgrade() {
-            // A draft picks up the default once models are known.
+            // A draft picks up the default once models are known. A chosen model
+            // that isn't installed stays, with the banner saying so.
             {
                 let mut st = p.st.borrow_mut();
-                if st.chat.is_none() && (st.draft.model.is_empty() || !models::is_installed(&st.draft.model)) {
+                if st.chat.is_none() && st.draft.model.is_empty() {
                     st.draft.model = models::default_model();
                 }
             }

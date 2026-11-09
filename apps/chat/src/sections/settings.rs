@@ -30,39 +30,60 @@ pub fn build(page: &Page) {
     data(page);
 }
 
+/// Nyx AI Core's own settings, shared by every Nyx app (Nyx Settings has them under
+/// Local AI too). Shown as AI Core has them; a change goes straight to it.
 fn local_server_settings(page: &Page) {
     if !crate::llama::api::installed() { return; }
     let g = page.group("Local models (Nyx AI Core)");
-    let p = prefs::get();
-    let (r, _) = widgets::choice_row(
+    let mut max_opts = widgets::opts(&[("1", "One"), ("2", "Two"), ("4", "Four")]);
+    let mut idle_opts = widgets::opts(&[("-1", "Never"), ("300", "5 minutes"), ("900", "15 minutes"), ("3600", "1 hour")]);
+    let max = widgets::dropdown(&max_opts, "");
+    let idle = widgets::dropdown(&idle_opts, "");
+    max.set_sensitive(false);
+    idle.set_sensitive(false);
+    g.add(&widgets::row(
         "Models kept loaded",
         "More loaded models switch faster but use more memory. Shared by every Nyx app.",
-        widgets::opts(&[("1", "One"), ("2", "Two"), ("4", "Four")]),
-        &p.llama_models_max.to_string(),
-        |v| {
-            prefs::update(|p| p.llama_models_max = v.parse().unwrap_or(1));
-            apply_local_service();
-        },
-    );
-    g.add(&r);
-    let (r, _) = widgets::choice_row(
+        Some(max.upcast_ref()),
+    ));
+    g.add(&widgets::row(
         "Sleep after inactivity",
         "Unload idle models from memory. A model loads again for the next request.",
-        widgets::opts(&[("-1", "Never"), ("300", "5 minutes"), ("900", "15 minutes"), ("3600", "1 hour")]),
-        &p.llama_idle_seconds.to_string(),
-        |v| {
-            prefs::update(|p| p.llama_idle_seconds = v.parse().unwrap_or(-1));
-            apply_local_service();
-        },
-    );
-    g.add(&r);
+        Some(idle.upcast_ref()),
+    ));
+    crate::rt::spawn(crate::llama::core::service_settings(), move |r| {
+        let Ok((max_loaded, idle_seconds)) = r else {
+            max.set_tooltip_text(Some("Nyx AI Core isn't running"));
+            idle.set_tooltip_text(Some("Nyx AI Core isn't running"));
+            return;
+        };
+        let show = |dd: &gtk::DropDown, opts: &mut Vec<(String, String)>, value: String, label: String| {
+            if !opts.iter().any(|(id, _)| *id == value) {
+                opts.push((value.clone(), label));
+                let labels: Vec<&str> = opts.iter().map(|(_, l)| l.as_str()).collect();
+                dd.set_model(Some(&gtk::StringList::new(&labels)));
+            }
+            dd.set_selected(opts.iter().position(|(id, _)| *id == value).unwrap_or(0) as u32);
+            dd.set_sensitive(true);
+        };
+        show(&max, &mut max_opts, max_loaded.to_string(), max_loaded.to_string());
+        show(&idle, &mut idle_opts, idle_seconds.to_string(), format!("{} minutes", idle_seconds / 60));
+        max.connect_selected_notify(move |d| {
+            if let Some(v) = max_opts.get(d.selected() as usize).and_then(|(id, _)| id.parse().ok()) {
+                apply_local_service(Some(v), None);
+            }
+        });
+        idle.connect_selected_notify(move |d| {
+            if let Some(v) = idle_opts.get(d.selected() as usize).and_then(|(id, _)| id.parse().ok()) {
+                apply_local_service(None, Some(v));
+            }
+        });
+    });
 }
 
 /// Nyx AI Core takes these at once; nothing restarts.
-fn apply_local_service() {
-    let p = prefs::get();
-    let (max, idle) = (p.llama_models_max, p.llama_idle_seconds);
-    crate::rt::spawn(async move { crate::llama::core::configure_service(max, idle).await }, |r| {
+fn apply_local_service(max_loaded: Option<u32>, idle_seconds: Option<i64>) {
+    crate::rt::spawn(crate::llama::core::configure_service(max_loaded, idle_seconds), |r| {
         if let Err(e) = r {
             window::toast(&format!("Couldn't change Nyx AI Core: {}", crate::ollama::api::short_error(&format!("{e:#}"))));
         }
@@ -258,7 +279,7 @@ fn connection(page: &Page) {
                 );
                 let kind = if h.backend == Backend::Ollama {
                     "Ollama"
-                } else if prefs::normalize_host(&h.url, h.backend) == crate::llama::core::URL {
+                } else if crate::llama::core::is_this_computer(&prefs::normalize_host(&h.url, h.backend)) {
                     "Nyx AI Core"
                 } else {
                     "llama.cpp"

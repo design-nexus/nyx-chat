@@ -1,4 +1,4 @@
-//! Chat — a desktop client for llama.cpp and Ollama.
+//! Chat — a desktop chat client for local models in Nyx AI Core, remote llama.cpp servers and Ollama.
 
 mod chatlist;
 mod clamp;

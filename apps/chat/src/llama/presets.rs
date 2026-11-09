@@ -1,8 +1,8 @@
 //! Model-specific load-time settings for this computer's models, kept by Nyx AI
-//! Core. Chat sends what differs; AI Core applies a loaded model's changes when
-//! it's next idle and says which are still waiting.
+//! Core. Chat reads them (its copy in prefs is only for drawing and fitting
+//! context) and sends what the person changes; AI Core applies a loaded model's
+//! changes when it's next idle and says which are still waiting.
 
-use anyhow::Result;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
@@ -17,27 +17,36 @@ thread_local! {
     static WATCHING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-/// Send every model's settings (and the defaults) to Nyx AI Core.
-pub fn sync() -> Result<()> {
-    if !crate::llama::api::local_service() {
-        return Ok(());
+/// Read the settings Nyx AI Core loads each of `names` with. Nothing is sent:
+/// defaults set elsewhere (Nyx Settings, another app) stay as they are.
+pub fn pull(names: Vec<String>) {
+    if !crate::llama::api::local_service() || names.is_empty() {
+        return;
     }
-    let models = prefs::get().model_settings;
     rt::spawn(
         async move {
-            crate::llama::core::configure("*", &ModelSettings::default()).await?;
-            for (name, settings) in &models {
-                crate::llama::core::configure(name, settings).await?;
+            let mut out = Vec::new();
+            for name in names {
+                if let Ok(settings) = crate::llama::core::settings_of(&name).await {
+                    out.push((name, settings));
+                }
             }
-            Ok::<_, anyhow::Error>(())
+            out
         },
-        |r| {
-            if let Err(e) = r {
-                crate::window::toast(&format!("Couldn't send model settings to Nyx AI Core: {}", crate::ollama::api::short_error(&format!("{e:#}"))));
+        |read: Vec<(String, ModelSettings)>| {
+            let changed = read.iter().any(|(name, s)| prefs::get().model_settings.get(name) != Some(s));
+            if changed {
+                prefs::update(|p| {
+                    for (name, s) in read {
+                        if !pending(&name) {
+                            p.model_settings.insert(name, s);
+                        }
+                    }
+                });
+                hub::emit(&hub::MODELS);
             }
         },
     );
-    Ok(())
 }
 
 pub fn pending(name: &str) -> bool { PENDING.with(|p| p.borrow().contains_key(name)) }

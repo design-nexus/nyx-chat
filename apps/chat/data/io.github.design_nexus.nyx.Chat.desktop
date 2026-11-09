@@ -9,7 +9,7 @@ Terminal=false
 StartupNotify=true
 StartupWMClass=io.github.design_nexus.nyx.Chat
 Categories=Utility;Development;GTK;
-Keywords=llama.cpp;ollama;llm;ai;chat;model;assistant;huggingface;gguf;local;
+Keywords=nyx-ai;llama.cpp;ollama;llm;ai;chat;model;assistant;huggingface;gguf;local;
 Actions=new;quick;models;marketplace;
 
 [Desktop Action new]

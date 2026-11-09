@@ -17,11 +17,21 @@ use crate::ollama::api::{Conn, Installed, ModelInfo, Progress, Running};
 use crate::ollama::chat::{Cancel, Event, Msg, Request, Stats, ToolCall};
 use crate::prefs::{Backend, ModelSettings};
 
-/// The address the local host has always had in Chat's settings.
-pub const URL: &str = "http://127.0.0.1:8080";
+/// Whether a llama.cpp host's address is this computer. Every llama.cpp model on
+/// this computer runs in Nyx AI Core, whatever port the host was given.
+pub fn is_this_computer(url: &str) -> bool {
+    let rest = url.split_once("://").map_or(url, |(_, r)| r);
+    let authority = rest.split('/').next().unwrap_or("");
+    let host = match authority.strip_prefix('[') {
+        Some(v6) => v6.split(']').next().unwrap_or(""),
+        None => authority.rsplit_once(':').map_or(authority, |(h, _)| h),
+    };
+    let host = host.to_ascii_lowercase();
+    host == "localhost" || host == "::1" || host.parse::<std::net::Ipv4Addr>().is_ok_and(|ip| ip.is_loopback())
+}
 
 pub fn local(conn: &Conn) -> bool {
-    conn.backend == Backend::LlamaCpp && conn.url == URL
+    conn.backend == Backend::LlamaCpp && is_this_computer(&conn.url)
 }
 
 fn client() -> Client {
@@ -29,11 +39,22 @@ fn client() -> Client {
 }
 
 fn fail(e: proto::Error) -> anyhow::Error {
-    if e.kind == proto::ErrorKind::Unavailable {
-        anyhow!("The model server isn't reachable. Nyx AI Core isn't running; start it in Settings.")
-    } else {
-        anyhow!("{}", e.message)
-    }
+    use proto::ErrorKind as K;
+    let detail = e.message.trim();
+    let text = match e.kind {
+        K::Unavailable => "The model server isn't reachable. Nyx AI Core isn't running; start it in Settings.".to_string(),
+        K::IncompatibleVersion => "This version of Chat and the installed Nyx AI Core don't match. Update both.".to_string(),
+        K::UnknownModel => format!("Nyx AI Core doesn't have that model. Download it, or pick another. ({detail})"),
+        K::ModelLoadFailed => format!("The model couldn't load: {detail}"),
+        K::WorkerUnavailable | K::WorkerFailed => format!("Nyx AI Core's model runner stopped; it restarts by itself. Try again in a moment. ({detail})"),
+        K::Busy | K::ResourceExhausted => format!("Nyx AI Core is busy or out of memory. Try again, or unload a model. ({detail})"),
+        K::PermissionDenied => format!("Nyx AI Core didn't allow that: {detail}"),
+        K::UnsupportedCapability => format!("This model can't do that: {detail}"),
+        K::Cancelled => "Stopped".to_string(),
+        K::Timeout => "Nyx AI Core took too long to answer.".to_string(),
+        _ => detail.to_string(),
+    };
+    anyhow!(text)
 }
 
 pub async fn version() -> Result<String> {
@@ -273,14 +294,25 @@ pub fn request(req: &Request) -> Result<ChatRequest> {
         reasoning_effort,
         thinking: req.think,
         priority: Priority::Interactive,
+        ..Default::default()
     })
 }
 
 pub async fn stream_once(req: &Request, tx: &async_channel::Sender<Event>, cancel: &Cancel) -> Result<(String, String, Vec<ToolCall>, Stats)> {
-    let mut stream = client().chat(request(req)?).await.map_err(fail)?;
+    stream_with(&client(), req, tx, cancel).await
+}
+
+async fn stream_with(
+    client: &Client,
+    req: &Request,
+    tx: &async_channel::Sender<Event>,
+    cancel: &Cancel,
+) -> Result<(String, String, Vec<ToolCall>, Stats)> {
+    let mut stream = client.chat(request(req)?).await.map_err(fail)?;
     let mut out = ChatOutcome::default();
     loop {
         if cancel.load(Ordering::Relaxed) {
+            let _ = stream.cancel().await;
             break;
         }
         let item = tokio::select! {
@@ -345,20 +377,57 @@ pub fn values(s: &ModelSettings) -> BTreeMap<String, String> {
     .collect()
 }
 
-/// Send what differs from AI Core's settings for `model` (`*` for the
-/// defaults). Returns whether they wait for the model's next load.
+/// The settings a load of `model` uses (AI Core's defaults with the model's own),
+/// in Chat's terms; Chat's defaults fill what AI Core leaves to llama.cpp.
+pub fn from_values(effective: &BTreeMap<String, String>) -> ModelSettings {
+    let d = ModelSettings::default();
+    let get = |k: &str| effective.get(k).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+    let num = |k: &str, fallback: f64| get(k).and_then(|v| v.parse().ok()).unwrap_or(fallback);
+    ModelSettings {
+        num_ctx: get("ctx-size").and_then(|v| v.parse().ok()).filter(|n: &i64| *n > 0).unwrap_or(d.num_ctx),
+        gpu_layers: get("n-gpu-layers").unwrap_or(d.gpu_layers),
+        flash_attention: get("flash-attn").unwrap_or(d.flash_attention),
+        kv_cache: get("cache-type-k").unwrap_or(d.kv_cache),
+        temperature: num("temp", d.temperature),
+        top_p: num("top-p", d.top_p),
+        top_k: get("top-k").and_then(|v| v.parse().ok()).unwrap_or(d.top_k),
+        min_p: num("min-p", d.min_p),
+        repeat_penalty: num("repeat-penalty", d.repeat_penalty),
+    }
+}
+
+/// The settings AI Core loads `model` with.
+pub async fn settings_of(model: &str) -> Result<ModelSettings> {
+    Ok(from_values(&client().model_settings(model).await.map_err(fail)?.effective))
+}
+
+/// What to send AI Core for `model`: only the keys the person changed from what a
+/// load would use now, so its other defaults (from Nyx Settings) stay in charge.
+pub fn changes(effective: &BTreeMap<String, String>, settings: &ModelSettings) -> BTreeMap<String, String> {
+    let now = values(&from_values(effective));
+    values(settings).into_iter().filter(|(k, v)| now.get(k) != Some(v)).collect()
+}
+
+/// Send the person's changes for `model`. Returns whether they wait for the
+/// model's next load.
 pub async fn configure(model: &str, settings: &ModelSettings) -> Result<bool> {
     let client = client();
     let current = client.model_settings(model).await.map_err(fail)?;
-    let changes: BTreeMap<String, String> = values(settings).into_iter().filter(|(k, v)| current.values.get(k) != Some(v)).collect();
+    let changes = changes(&current.effective, settings);
     if changes.is_empty() {
         return Ok(current.pending);
     }
     Ok(client.configure_model(model, changes).await.map_err(fail)?.pending)
 }
 
-pub async fn configure_service(max_loaded: u32, idle_seconds: i64) -> Result<()> {
-    client().configure_service(Some(max_loaded), Some(idle_seconds)).await.map(|_| ()).map_err(fail)
+/// How many models AI Core keeps loaded and how long an idle one stays.
+pub async fn service_settings() -> Result<(u32, i64)> {
+    let s = client().service_settings().await.map_err(fail)?;
+    Ok((s.max_loaded, s.idle_unload_seconds))
+}
+
+pub async fn configure_service(max_loaded: Option<u32>, idle_seconds: Option<i64>) -> Result<()> {
+    client().configure_service(max_loaded, idle_seconds).await.map(|_| ()).map_err(fail)
 }
 
 /// The GPU memory AI Core sees, for fit estimates.
@@ -391,6 +460,155 @@ mod tests {
         assert!(matches!(&parts[1], Part::ImageUrl { image_url } if image_url.url.starts_with("data:image/jpeg;base64,")));
         let req = ChatRequest { model: "m".into(), messages: out, ..Default::default() };
         req.validate().unwrap();
+    }
+
+    #[test]
+    fn every_local_address_is_ai_core() {
+        for url in ["http://127.0.0.1:8080", "http://localhost:8081", "http://[::1]:9000", "https://127.0.0.2:443/v1", "http://LOCALHOST"] {
+            assert!(is_this_computer(url), "{url}");
+        }
+        for url in ["http://192.168.1.5:8080", "https://llm.example.com", "http://localhost.example.com:8080"] {
+            assert!(!is_this_computer(url), "{url}");
+        }
+        let conn = |url: &str, backend| Conn { url: url.into(), key: String::new(), backend };
+        assert!(local(&conn("http://localhost:8081", Backend::LlamaCpp)));
+        assert!(!local(&conn("http://127.0.0.1:11434", Backend::Ollama)));
+    }
+
+    #[test]
+    fn errors_say_what_happened() {
+        use proto::ErrorKind as K;
+        let msg = |kind, m: &str| fail(proto::Error::new(kind, m)).to_string();
+        assert!(msg(K::Unavailable, "").contains("isn't running"));
+        assert!(msg(K::IncompatibleVersion, "v2").contains("don't match"));
+        assert!(msg(K::UnknownModel, "no such model").contains("Download it"));
+        assert!(msg(K::ModelLoadFailed, "out of memory").ends_with("out of memory"));
+        assert!(msg(K::WorkerFailed, "crashed").contains("restarts by itself"));
+        assert!(msg(K::Busy, "queue full").contains("busy"));
+        assert_eq!(msg(K::InvalidRequest, "bad field"), "bad field");
+    }
+
+    #[test]
+    fn edits_send_only_what_changed() {
+        let effective: BTreeMap<String, String> =
+            [("ctx-size", "32768"), ("n-gpu-layers", "auto"), ("temp", "0.6")].iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        let now = from_values(&effective);
+        assert_eq!(now.num_ctx, 32768);
+        assert_eq!(now.temperature, 0.6);
+        assert!(changes(&effective, &now).is_empty());
+        let edited = ModelSettings { num_ctx: 65536, ..now };
+        assert_eq!(changes(&effective, &edited).into_iter().collect::<Vec<_>>(), [("ctx-size".to_string(), "65536".to_string())]);
+    }
+
+    /// A stand-in for Nyx AI Core on its own socket: `ok` streams two pieces,
+    /// `slow` streams one and waits to be cancelled, anything else is unknown.
+    async fn fake_core(dir: &std::path::Path) -> (std::path::PathBuf, std::sync::Arc<std::sync::atomic::AtomicBool>) {
+        use proto::{ClientLine, Error as CoreError, ErrorKind, Finished, Op, Reply, ServerLine, Welcome};
+        use std::os::unix::fs::PermissionsExt;
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        let path = dir.join("ai.sock");
+        let listener = tokio::net::UnixListener::bind(&path).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let seen = cancelled.clone();
+        tokio::spawn(async move {
+            while let Ok((sock, _)) = listener.accept().await {
+                let seen = seen.clone();
+                tokio::spawn(async move {
+                    let (read, mut write) = sock.into_split();
+                    let mut lines = BufReader::new(read).lines();
+                    let mut send = async |line: ServerLine| {
+                        let mut s = serde_json::to_string(&line).unwrap();
+                        s.push('\n');
+                        write.write_all(s.as_bytes()).await.unwrap();
+                    };
+                    let _hello = lines.next_line().await.unwrap();
+                    send(ServerLine::Hello(Welcome { api_version: proto::API_VERSION, server: "test".into(), client: "nyx-chat".into() })).await;
+                    let Some(line) = lines.next_line().await.unwrap() else { return };
+                    let ClientLine::Request(req) = serde_json::from_str(&line).unwrap() else { panic!("no request") };
+                    let Op::Chat(chat) = req.op else { panic!("not a chat") };
+                    let delta = |text: &str| ServerLine::Event {
+                        id: req.id,
+                        event: CoreEvent::Delta { content: text.into(), reasoning: String::new(), tool_calls: vec![] },
+                    };
+                    match chat.model.as_str() {
+                        "ok" => {
+                            send(delta("Hel")).await;
+                            send(delta("lo")).await;
+                            let finished = Finished { finish_reason: "stop".into(), ..Default::default() };
+                            send(ServerLine::Result { id: req.id, result: Reply::Finished(finished) }).await;
+                        }
+                        "slow" => {
+                            send(delta("a")).await;
+                            if let Some(line) = lines.next_line().await.unwrap()
+                                && let ClientLine::Request(c) = serde_json::from_str(&line).unwrap()
+                                && matches!(c.op, Op::Cancel { request } if request == req.id)
+                            {
+                                seen.store(true, Ordering::SeqCst);
+                                send(ServerLine::Error { id: Some(req.id), error: CoreError::new(ErrorKind::Cancelled, "cancelled") }).await;
+                            }
+                        }
+                        other => send(ServerLine::Error { id: Some(req.id), error: CoreError::new(ErrorKind::UnknownModel, other) }).await,
+                    }
+                });
+            }
+        });
+        (path, cancelled)
+    }
+
+    fn chat_request(model: &str) -> Request {
+        Request {
+            conn: Conn { url: URL_FOR_TESTS.into(), key: String::new(), backend: Backend::LlamaCpp },
+            model: model.into(),
+            messages: vec![Msg::new("user", "hi")],
+            tools: Vec::new(),
+            think: None,
+            format: None,
+            options: json!({}),
+            keep_alive: String::new(),
+            max_rounds: 1,
+            tool_ctx: crate::tools::Ctx { prefs: Default::default() },
+        }
+    }
+
+    const URL_FOR_TESTS: &str = "http://127.0.0.1:8080";
+
+    #[tokio::test]
+    async fn streams_stops_and_reports_through_ai_core() {
+        let dir = std::env::temp_dir().join(format!("nyx-chat-core-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (socket, cancelled) = fake_core(&dir).await;
+        let client = Client::with_socket("nyx-chat", &socket);
+
+        let (tx, rx) = async_channel::unbounded();
+        let stop: Cancel = Default::default();
+        let (content, _, calls, stats) = stream_with(&client, &chat_request("ok"), &tx, &stop).await.unwrap();
+        assert_eq!(content, "Hello");
+        assert!(calls.is_empty());
+        assert_eq!(stats.done_reason, "stop");
+        assert_eq!(rx.len(), 2);
+
+        let err = stream_with(&client, &chat_request("gone"), &tx, &stop).await.unwrap_err();
+        assert!(err.to_string().contains("doesn't have that model"), "{err}");
+
+        let (tx, rx) = async_channel::unbounded();
+        let stop: Cancel = Default::default();
+        let stopper = stop.clone();
+        tokio::spawn(async move {
+            let _ = rx.recv().await;
+            stopper.store(true, Ordering::SeqCst);
+        });
+        let (content, ..) = stream_with(&client, &chat_request("slow"), &tx, &stop).await.unwrap();
+        assert_eq!(content, "a");
+        for _ in 0..50 {
+            if cancelled.load(Ordering::SeqCst) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(cancelled.load(Ordering::SeqCst), "AI Core was asked to cancel");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

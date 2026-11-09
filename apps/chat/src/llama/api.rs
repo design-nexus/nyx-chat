@@ -205,7 +205,7 @@ pub fn service_state() -> String {
 pub fn local_service() -> bool {
     let host = crate::prefs::get().host();
     host.backend == crate::prefs::Backend::LlamaCpp
-        && crate::prefs::normalize_host(&host.url, host.backend) == core::URL
+        && core::is_this_computer(&crate::prefs::normalize_host(&host.url, host.backend))
 }
 
 pub fn service_enabled() -> bool {

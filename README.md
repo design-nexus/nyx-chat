@@ -1,11 +1,10 @@
 # Chat
 
-A desktop chat client for [Ollama](https://ollama.com), built with GTK 4. It chats with
-local models, lets them use tools such as web search, and has a marketplace for finding
-and downloading models from Hugging Face and the Ollama library. It takes its colors
+A desktop chat client for [Nyx AI Core](https://github.com/design-nexus/nyx-ai) (the suite's shared llama.cpp runtime) and optional [Ollama](https://ollama.com), built with GTK 4. It chats with
+local models, lets them use tools such as web search, and downloads GGUF models from Hugging Face. It takes its colors
 from your [Omarchy](https://omarchy.org) theme and fits a half-screen tile.
 
-Chat talks to an Ollama server (on this computer by default). It doesn't run models itself.
+Chat uses Nyx AI Core on this computer by default. It loads, schedules and downloads models for every Nyx app; Chat keeps its own chats, prompts and knowledge bases.
 
 ## What it does
 
@@ -63,17 +62,12 @@ Chat talks to an Ollama server (on this computer by default). It doesn't run mod
   - Models without tool support still get web results: the search runs first and the
     results go into the prompt.
 - **Memories:** facts about you that every chat knows.
-- **Knowledge:** collections of documents, embedded with an Ollama embedding model, that
-  chats can answer from.
-- **Models:** what's installed, what's loaded (and how much sits on the GPU), with
-  unload, copy, delete, details and a model's parameters and template. **Create** makes
-  a new model from an installed one with its own system prompt and settings. **Check for
-  updates** compares each model with its registry and updates it in one click; this also
-  happens once a day.
+- **Knowledge:** collections of documents embedded with a model on the selected backend. Existing collections are re-embedded from their saved text when first used with a new backend.
+- **Models:** installed, loaded, and downloading models on the selected server, with load, unload, delete and details. Ollama also offers copy, create, and registry update checks.
 - **Marketplace:**
   - Search Hugging Face GGUF repositories by trending, downloads, likes or date, and
     filter to text, vision or embedding models.
-  - Search the Ollama library and see every tag with its size.
+  - When using Ollama, search its library and see every tag with its size.
   - Each download is marked **Fits GPU**, **Partial offload** or **Too big** for this
     computer, counting the memory for the context length set in Settings, and the best
     fit is marked **Recommended**.
@@ -86,8 +80,8 @@ Chat talks to an Ollama server (on this computer by default). It doesn't run mod
   [Piper](https://github.com/rhasspy/piper). Hands-free mode sends when you stop talking.
 - **Quick ask:** `nyx-chat --quick` opens a small window for one-off questions, optionally
   about the text you've highlighted or copied. **Open in chat** keeps the exchange.
-- **Several servers:** add other computers running Ollama and switch between them from
-  the status bar.
+- **Several servers:** add llama.cpp or Ollama servers on other computers and switch between them at the foot of the sidebar. A llama.cpp address on this computer (`localhost` or `127.0.0.1`, any port) always means Nyx AI Core. Chat never starts or stops Ollama.
+- **No silent model swaps:** when a chat's model, Quick ask's or a knowledge base's embedding model isn't installed, Chat says so; it doesn't quietly use another.
 - **Import and export:** all chats as one JSON file, and imports from Open WebUI exports.
 
 ### Easy on the battery
@@ -114,7 +108,11 @@ o.window({ title = "^Quick ask$" }, { float = true, center = true, size = { 720,
 To remove it, run the same line with `uninstall.sh` in place of `install.sh`. Add
 `-s -- --purge` to also remove its settings and chat history.
 
-You also need [Ollama](https://ollama.com/download), here or on another computer.
+Local models need [Nyx AI Core](https://github.com/design-nexus/nyx-ai): install it first. It starts when Chat first needs a model; Chat's Connection settings can stop, start or restart it. Updating Chat retires the llama.cpp server older versions installed. Ollama is optional.
+### Coding tools
+
+Nyx AI Core serves an OpenAI-compatible API at `http://127.0.0.1:8080/v1`, the address Chat's server used before. Point a client there, choose a model ID from `GET /v1/models`, and enter any placeholder API key if the client requires one. It binds to localhost and starts on the first request, whether or not Chat is open.
+
 Optional: `wl-clipboard` (Quick ask with the selection), `grim` and `slurp`
 (screenshots), `poppler` (PDFs), `geoclue` (desktop location), whisper.cpp and Piper
 (voice).

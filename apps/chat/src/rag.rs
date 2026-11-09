@@ -1,5 +1,5 @@
 //! Retrieval: split documents into overlapping chunks, embed them with an
-//! Ollama embedding model, and find the chunks closest to a question.
+//! embedding model on the selected server, and find the chunks closest to a question.
 
 use anyhow::Result;
 

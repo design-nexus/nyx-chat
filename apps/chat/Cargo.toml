@@ -1,7 +1,7 @@
 [package]
 name = "nyx-chat"
 version = "0.1.0"
-description = "A desktop chat client for Nyx AI Core, llama.cpp and Ollama with tools and a GGUF marketplace"
+description = "A desktop chat client for local models in Nyx AI Core, remote llama.cpp servers and Ollama, with tools and a GGUF marketplace"
 license = "MIT"
 repository = "https://github.com/design-nexus/nyx-chat"
 authors = ["Ken Smith"]
@@ -15,7 +15,7 @@ path = "src/main.rs"
 nyx-core = { git = "https://github.com/design-nexus/nyx-core.git", rev = "4378e243aeb09733843996663cd9a5a7f0cbb821" }
 nyx-ui = { git = "https://github.com/design-nexus/nyx-design.git", rev = "40db521bab468d54f18f65c6aabd7fc8533d6a4d" }
 nyx-theme = { git = "https://github.com/design-nexus/nyx-design.git", rev = "40db521bab468d54f18f65c6aabd7fc8533d6a4d" }
-nyx-ai-client = { git = "https://github.com/design-nexus/nyx-ai.git", rev = "d0f202b873a9609a09dfa764f2bf45ed0097e736" }
+nyx-ai-client = { git = "https://github.com/design-nexus/nyx-ai.git", rev = "da5b6f64fb2af00db57af7f572f3bea378441f1c" }
 anyhow = "1"
 async-channel = "2"
 base64 = "0.22"

@@ -388,13 +388,7 @@ fn model_row(m: &Installed, is_default: bool) -> gtk::Widget {
                     models::refresh();
                 });
             } else {
-                let prefs = prefs::get();
-                let running = models::running();
-                let unload = if prefs.host().backend == prefs::Backend::LlamaCpp
-                    && prefs.llama_models_max > 0 && running.len() >= prefs.llama_models_max as usize {
-                    running.into_iter().find(|m| m.name != name).map(|m| m.name)
-                } else { None };
-                models::load(&name, unload);
+                models::load(&name, None);
             }
         });
         controls.append(&load);
@@ -475,7 +469,6 @@ fn model_menu(m: &Installed) -> gtk::Popover {
                 Ok(()) => {
                     if crate::llama::api::local_service() {
                         prefs::update(|p| { p.model_settings.remove(&deleted); });
-                        let _ = crate::llama::presets::sync();
                     }
                     window::toast("Model deleted");
                 },
@@ -490,8 +483,21 @@ fn model_menu(m: &Installed) -> gtk::Popover {
     pop
 }
 
+/// Opens with what Nyx AI Core loads the model with now.
 fn model_settings_dialog(name: &str) {
-    let current = prefs::for_model(name);
+    let (model, n) = (name.to_string(), name.to_string());
+    rt::spawn(async move { crate::llama::core::settings_of(&n).await }, move |r| match r {
+        Ok(current) => {
+            if !crate::llama::presets::pending(&model) {
+                prefs::update(|p| { p.model_settings.insert(model.clone(), current.clone()); });
+            }
+            settings_dialog(&model, if crate::llama::presets::pending(&model) { prefs::for_model(&model) } else { current });
+        }
+        Err(e) => window::toast(&format!("Couldn't read the model's settings: {}", api::short_error(&format!("{e:#}")))),
+    });
+}
+
+fn settings_dialog(name: &str, current: prefs::ModelSettings) {
     let (dialog, card) = widgets::dialog(&format!("Model settings · {}", util::model_label(name)), 520);
     let scroller = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never)
         .min_content_height(480).max_content_height(640).propagate_natural_height(true).build();
@@ -585,15 +591,10 @@ fn model_settings_dialog(name: &str) {
                 else { p.reasoning_hidden.insert(model.clone(), hidden); }
             }
         });
-        match crate::llama::presets::sync() {
-            Ok(()) => {
-                if runtime_changed { crate::llama::presets::mark_with_context(model.clone(), current.num_ctx); }
-                hub::emit(&hub::MODELS);
-                window::toast(if crate::llama::presets::pending(&model) { "Saved; runtime changes apply on the next model load" } else { "Model settings saved" });
-                d.close();
-            }
-            Err(e) => window::toast(&format!("Couldn't save model settings: {e:#}")),
-        }
+        if runtime_changed { crate::llama::presets::mark_with_context(model.clone(), current.num_ctx); }
+        hub::emit(&hub::MODELS);
+        window::toast(if crate::llama::presets::pending(&model) { "Saved; runtime changes apply on the next model load" } else { "Model settings saved" });
+        d.close();
     });
     dialog.present();
 }

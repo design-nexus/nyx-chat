@@ -28,13 +28,6 @@ impl Default for ModelSettings {
     }
 }
 
-impl ModelSettings {
-    pub fn from_legacy(p: &Prefs) -> Self {
-        Self { num_ctx: p.num_ctx, gpu_layers: p.llama_gpu_layers.clone(), flash_attention: p.llama_flash_attention.clone(),
-            temperature: p.temperature, top_p: p.top_p, top_k: p.top_k, ..Self::default() }
-    }
-}
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Backend {
@@ -109,8 +102,7 @@ pub struct Prefs {
     /// Settings for this computer's llama.cpp user service.
     pub llama_gpu_layers: String,
     pub llama_flash_attention: String,
-    pub llama_models_max: u32,
-    pub llama_idle_seconds: i64,
+    /// What Nyx AI Core loads each local model with, as last read from it.
     pub model_settings: BTreeMap<String, ModelSettings>,
     /// Levels a model accepts but the user does not want offered.
     pub reasoning_hidden: BTreeMap<String, Vec<String>>,
@@ -193,8 +185,6 @@ impl Default for Prefs {
             num_ctx: 8192,
             llama_gpu_layers: "auto".into(),
             llama_flash_attention: "auto".into(),
-            llama_models_max: 1,
-            llama_idle_seconds: -1,
             model_settings: BTreeMap::new(),
             reasoning_hidden: BTreeMap::new(),
             model_settings_migrated: false,

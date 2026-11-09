@@ -36,8 +36,14 @@
 - Don't wake the dGPU: `GSK_RENDERER=ngl` in `main.rs`; `hw.rs` only calls `nvidia-smi`
   while `runtime_status` isn't `suspended`, and caches VRAM in prefs.
 - Control (`src/control.rs`): `nyx_core::control` on the app's bus name, for Nyx Assistant: `chat.list`, `search`, `read`, `open`, `send` (`sections::chat::send_text`).
-- Checks: `cargo clippy -- -D warnings`, `cargo test` (network tests: `cargo test -- --ignored`
-  with `OLLAMA_URL` pointing at a server that has `all-minilm`).
+- Local models: every llama.cpp host on this computer (any loopback address and port) is Nyx AI
+  Core, through `llama/core.rs` and `nyx-ai-client`. AI Core owns model and service settings:
+  Chat reads them (`presets::pull`) and sends only what the person edits; it never pushes its
+  own defaults or unloads models to make room. Don't swap a missing model silently
+  (`models::default_model`, `models::stand_in`).
+- Checks: `cargo clippy -- -D warnings`, `cargo test` (the AI Core tests run against a fake
+  socket; network tests: `cargo test -- --ignored` with `OLLAMA_URL` pointing at a server that
+  has `all-minilm`).
 - Visual check: a test copy on a private virtual monitor, with scratch
   `XDG_CONFIG_HOME`/`XDG_DATA_HOME`/`XDG_CACHE_HOME`:
   `NYX_CHAT_APP_ID=io.github.design_nexus.nyx.ChatTest nyx-chat --section models` (a separate

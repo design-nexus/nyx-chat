@@ -57,7 +57,7 @@ pub async fn lookup(prefs: &Prefs) -> Result<Location> {
 fn client() -> reqwest::Client {
     reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
-        .user_agent(concat!("nyx-chat/", env!("CARGO_PKG_VERSION"), " (desktop Ollama client)"))
+        .user_agent(concat!("nyx-chat/", env!("CARGO_PKG_VERSION"), " (desktop chat client)"))
         .build()
         .unwrap_or_default()
 }

@@ -92,20 +92,36 @@ pub fn updates() -> Vec<String> {
     STATE.with(|s| s.borrow().updates.iter().cloned().collect())
 }
 
-/// The model a new chat starts with: the chosen one (or the last picked) if
-/// it's installed, else the first installed.
+/// The model a new chat starts with: the chosen one, else the last picked, else
+/// Nyx AI Core's default chat model. A chosen model that isn't installed stays
+/// chosen (the chat says so and offers the download); only with no choice at
+/// all does a chat start with the first installed model.
 pub fn default_model() -> String {
     let p = prefs::get();
-    let backend = p.host().backend;
     let shared = STATE.with(|s| s.borrow().shared_default.clone()).unwrap_or_default();
     let want = [p.new_chat_model, p.last_model, shared].into_iter().find(|m| !m.is_empty()).unwrap_or_default();
-    let chat = chat_models();
-    if !want.is_empty() && chat.contains(&want) {
+    if !want.is_empty() {
         return want;
     }
-    chat.first().cloned().unwrap_or_else(|| {
-        if backend == prefs::Backend::LlamaCpp { String::new() } else { want }
-    })
+    chat_models().first().cloned().unwrap_or_default()
+}
+
+/// `want` when it's installed; else the first of `available`, and the person
+/// is told once which model stands in for which.
+pub fn stand_in(want: &str, available: &[String], what: &str) -> String {
+    if want.is_empty() || available.iter().any(|m| m == want) {
+        return want.to_string();
+    }
+    let Some(other) = available.first().cloned() else { return String::new() };
+    thread_local! { static TOLD: RefCell<HashSet<(String, String)>> = RefCell::new(HashSet::new()); }
+    if TOLD.with(|t| t.borrow_mut().insert((want.to_string(), other.clone()))) {
+        crate::window::toast(&format!(
+            "{} isn't installed, so {what} uses {}",
+            crate::util::model_label(want),
+            crate::util::model_label(&other)
+        ));
+    }
+    other
 }
 
 pub fn is_loaded(name: &str) -> bool {
@@ -144,10 +160,9 @@ pub fn pick(name: &str) {
     }
     prefs::update(|p| p.last_model = name.to_string());
     if prefs::get().keep_loaded {
-        let p = prefs::get();
-        let unload = if p.host().backend == prefs::Backend::LlamaCpp && p.llama_models_max > 1 { None }
-            else { Some(prev).filter(|p| !p.is_empty() && p != name) };
-        load(name, unload);
+        // In Nyx AI Core, unloading only drops Chat's pin: the model stays while
+        // another app needs it, and AI Core decides what else to evict.
+        load(name, Some(prev).filter(|p| !p.is_empty() && p != name));
     }
 }
 
@@ -298,23 +313,15 @@ pub fn refresh() {
     );
 }
 
+/// Once per run, read what AI Core loads each model with. Chat's older copies
+/// aren't pushed back: AI Core's settings are the ones that count.
 fn initialize_model_presets(list: &[Installed]) {
     thread_local! { static READY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
-    if READY.with(|ready| ready.get()) { return; }
+    if READY.with(|ready| ready.replace(true)) { return; }
     if !prefs::get().model_settings_migrated {
-        prefs::update(|p| {
-            let old = prefs::ModelSettings::from_legacy(p);
-            for model in list { p.model_settings.entry(model.name.clone()).or_insert_with(|| old.clone()); }
-            p.model_settings_migrated = true;
-        });
+        prefs::update(|p| p.model_settings_migrated = true);
     }
-    match crate::llama::presets::sync() {
-        Ok(()) => {
-            READY.with(|ready| ready.set(true));
-            crate::llama::presets::mark(prefs::get().model_settings.keys().cloned());
-        },
-        Err(e) => crate::window::toast(&format!("Couldn't send model settings to Nyx AI Core: {e:#}")),
-    }
+    crate::llama::presets::pull(list.iter().map(|m| m.name.clone()).collect());
 }
 
 pub fn switch_host() {

@@ -12,7 +12,12 @@ pub struct Memory {
     pub ram: u64,
 }
 
+/// `cached_vram` is what Nyx AI Core last reported; with local models in AI Core
+/// that's the figure to fit against, so the card isn't probed here at all.
 pub fn detect(cached_vram: u64) -> Memory {
+    if crate::llama::api::local_service() && cached_vram > 0 {
+        return Memory { vram: cached_vram, ram: ram() };
+    }
     let vram = amd_vram().or_else(nvidia_vram).or((cached_vram > 0).then_some(cached_vram)).or_else(nvidia_bar).unwrap_or(0);
     Memory { vram, ram: ram() }
 }

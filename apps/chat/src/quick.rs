@@ -31,9 +31,15 @@ struct Quick {
     status: gtk::Label,
 }
 
-fn quick_model() -> String {
+/// Quick ask's model, and a note when its chosen one isn't installed.
+fn quick_model() -> (String, Option<String>) {
     let want = prefs::get().quick_model;
-    if !want.is_empty() && models::is_installed(&want) { want } else { models::default_model() }
+    if want.is_empty() || models::is_installed(&want) || models::online() != Some(true) {
+        return (if want.is_empty() { models::default_model() } else { want }, None);
+    }
+    let other = models::default_model();
+    let note = format!("{} isn't installed; asking {} instead.", util::model_label(&want), util::model_label(&other));
+    (other, Some(note))
 }
 
 /// Open (or focus) the window. `context` is text the question is about.
@@ -53,7 +59,7 @@ pub fn open(app: &gtk::Application, context: Option<String>) {
     let t = widgets::label("Quick ask", "panel-title");
     t.set_hexpand(true);
     head.append(&t);
-    let model = quick_model();
+    let (model, note) = quick_model();
     let ml = widgets::short_label(&util::model_label(&model), "mono", gtk::pango::EllipsizeMode::Middle);
     ml.set_max_width_chars(40);
     ml.add_css_class("dim");
@@ -83,7 +89,7 @@ pub fn open(app: &gtk::Application, context: Option<String>) {
         .child(&answer.root)
         .build();
     root.append(&scroll);
-    let status = widgets::label("", "dim");
+    let status = widgets::label(note.as_deref().unwrap_or(""), "dim");
     status.add_css_class("small-text");
     root.append(&status);
 
@@ -117,10 +123,11 @@ pub fn open(app: &gtk::Application, context: Option<String>) {
     // The model list may still be loading when the window opens.
     let (q2, ml2) = (q.clone(), ml.clone());
     crate::hub::on(&crate::hub::MODELS, &ml, move || {
-        let m = quick_model();
+        let (m, note) = quick_model();
         ml2.set_text(&util::model_label(&m));
         *q2.model.borrow_mut() = m.clone();
-        q2.status.set_text(if m.is_empty() && models::online() == Some(true) { "No models are installed yet." } else { "" });
+        let empty = m.is_empty() && models::online() == Some(true);
+        q2.status.set_text(if empty { "No models are installed yet." } else { note.as_deref().unwrap_or("") });
     });
     let q2 = q.clone();
     let (s2, ob) = (scroll.clone(), open_btn.clone());
