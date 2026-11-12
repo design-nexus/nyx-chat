@@ -221,7 +221,10 @@ fn build(app: &gtk::Application) {
     let mut last_group = "";
     for s in &sections {
         if s.group != last_group {
-            list.append(&nav_group(s.group, last_group.is_empty(), None));
+            let head = nav_group(s.group, last_group.is_empty(), None);
+            // The group's colour from the theme's [sections.chat]: chat, models, library.
+            nyx_ui::sidebar::set_section(&head, &s.group.to_lowercase());
+            list.append(&head);
             last_group = s.group;
         }
         let (button, content) = nav_button(s.icon, s.title, s.description);

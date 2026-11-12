@@ -102,6 +102,12 @@ fn group_label(title: &str, add: window::NavAdd<'_>) -> gtk::Box {
     head
 }
 
+/// `head` in its section's colour from the theme's [sections.chat].
+fn sectioned(head: gtk::Box, section: &str) -> gtk::Box {
+    nyx_ui::sidebar::set_section(&head, section);
+    head
+}
+
 fn fill(list: &gtk::Box, query: &str) {
     widgets::clear(list);
     if !query.is_empty() {
@@ -124,13 +130,13 @@ fn fill(list: &gtk::Box, query: &str) {
         let folders = store::folders().unwrap_or_default();
         let pinned: Vec<&Chat> = chats.iter().filter(|c| c.pinned && c.folder.is_none()).collect();
         if !pinned.is_empty() {
-            list.append(&group_label("Pinned", None));
+            list.append(&sectioned(group_label("Pinned", None), "pinned"));
             for c in pinned {
                 list.append(&chat_row(c));
             }
         }
 
-        list.append(&group_label("Folders", Some(("New folder", Box::new(|| edit_folder(Folder::default()))))));
+        list.append(&sectioned(group_label("Folders", Some(("New folder", Box::new(|| edit_folder(Folder::default()))))), "folders"));
         if folders.is_empty() {
             list.append(&empty_note("Folders give their chats a model, prompt and tools."));
         }
@@ -145,7 +151,7 @@ fn fill(list: &gtk::Box, query: &str) {
             }
         }
 
-        list.append(&group_label("Chats", Some(("New chat (Ctrl+N)", Box::new(|| chat::new_chat(None))))));
+        list.append(&sectioned(group_label("Chats", Some(("New chat (Ctrl+N)", Box::new(|| chat::new_chat(None))))), "chats"));
         let loose: Vec<&Chat> = chats.iter().filter(|c| !c.pinned && c.folder.is_none()).collect();
         if loose.is_empty() {
             list.append(&empty_note("Your chats will appear here."));
