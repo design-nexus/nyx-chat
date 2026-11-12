@@ -13,8 +13,8 @@ path = "src/main.rs"
 
 [dependencies]
 nyx-core = { git = "https://github.com/design-nexus/nyx-core.git", rev = "918729504918ec344b3a853a5ce0ea2c9dbb7b5f" }
-nyx-ui = { git = "https://github.com/design-nexus/nyx-design.git", rev = "7415428404b0f591e3e7e5215c4aa385d99385c6" }
-nyx-theme = { git = "https://github.com/design-nexus/nyx-design.git", rev = "7415428404b0f591e3e7e5215c4aa385d99385c6" }
+nyx-ui = { git = "https://github.com/design-nexus/nyx-design.git", rev = "05289df9dfffddbf6402fe16cdc398569eb34956" }
+nyx-theme = { git = "https://github.com/design-nexus/nyx-design.git", rev = "05289df9dfffddbf6402fe16cdc398569eb34956" }
 nyx-ai-client = { git = "https://github.com/design-nexus/nyx-ai.git", rev = "da5b6f64fb2af00db57af7f572f3bea378441f1c" }
 anyhow = "1"
 async-channel = "2"

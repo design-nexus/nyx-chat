@@ -221,9 +221,11 @@ fn build(app: &gtk::Application) {
     let mut last_group = "";
     for s in &sections {
         if s.group != last_group {
-            let head = nav_group(s.group, last_group.is_empty(), None);
-            // The group's colour from the theme's [sections.chat]: chat, models, library.
-            nyx_ui::sidebar::set_section(&head, &s.group.to_lowercase());
+            let first = last_group.is_empty();
+            let head = nav_group(s.group, first, None);
+            // The first group in the app's accent, the others from the theme's [sections.chat].
+            let section = if first { nyx_ui::sidebar::ACCENT_SECTION.to_string() } else { s.group.to_lowercase() };
+            nyx_ui::sidebar::set_section(&head, &section);
             list.append(&head);
             last_group = s.group;
         }
