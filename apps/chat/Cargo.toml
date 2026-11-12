@@ -12,9 +12,9 @@ name = "nyx-chat"
 path = "src/main.rs"
 
 [dependencies]
-nyx-core = { git = "https://github.com/design-nexus/nyx-core.git", rev = "918729504918ec344b3a853a5ce0ea2c9dbb7b5f" }
-nyx-ui = { git = "https://github.com/design-nexus/nyx-design.git", rev = "05289df9dfffddbf6402fe16cdc398569eb34956" }
-nyx-theme = { git = "https://github.com/design-nexus/nyx-design.git", rev = "05289df9dfffddbf6402fe16cdc398569eb34956" }
+nyx-core = { git = "https://github.com/design-nexus/nyx-core.git", rev = "32f0c5e154fc44c763b8ecd80d35a3b298723afa" }
+nyx-ui = { git = "https://github.com/design-nexus/nyx-design.git", rev = "4f8e16d6ae3dbc2a14091271e3b6bb29902c0df4" }
+nyx-theme = { git = "https://github.com/design-nexus/nyx-design.git", rev = "4f8e16d6ae3dbc2a14091271e3b6bb29902c0df4" }
 nyx-ai-client = { git = "https://github.com/design-nexus/nyx-ai.git", rev = "da5b6f64fb2af00db57af7f572f3bea378441f1c" }
 anyhow = "1"
 async-channel = "2"
