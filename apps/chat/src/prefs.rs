@@ -125,7 +125,10 @@ pub struct Prefs {
     /// duckduckgo, searxng, brave or tavily.
     pub search_backend: String,
     pub searxng_url: String,
+    /// Older versions kept the keys here; they move to the Secret Service on load.
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub brave_key: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub tavily_key: String,
     pub search_results: u32,
     pub search_fetch_pages: bool,
@@ -194,7 +197,9 @@ impl Default for Prefs {
             think: true,
             auto_title: true,
             enter_sends: true,
-            tools_enabled: vec!["web_search".into(), "web_fetch".into(), "calculator".into()],
+            // Searching and reading the web send what you ask off the computer: turned on
+            // in Settings › Tools.
+            tools_enabled: vec!["calculator".into()],
             allowed_folders: Vec::new(),
             max_tool_rounds: 8,
             search_backend: "duckduckgo".into(),
@@ -239,8 +244,18 @@ pub fn for_model(name: &str) -> ModelSettings {
 
 nyx_core::prefs_store!(Prefs, nyx_core::prefs::Store::standard_with(fix));
 
-/// There is always at least one host to talk to.
+/// There is always at least one host to talk to. Search keys live in the keyring.
 fn fix(p: &mut Prefs) -> bool {
+    let mut moved = false;
+    for (name, key) in [("brave", &mut p.brave_key), ("tavily", &mut p.tavily_key)] {
+        if !key.is_empty() && crate::secrets::set(name, key).is_ok() {
+            key.clear();
+            moved = true;
+        }
+    }
+    if moved {
+        return true;
+    }
     if !p.backend_migrated {
         if !p.hosts.iter().any(|h| h.backend == Backend::LlamaCpp) {
             p.hosts.insert(0, Host::default());

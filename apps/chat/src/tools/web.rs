@@ -31,8 +31,8 @@ pub async fn search(query: &str, prefs: &Prefs) -> Result<Output> {
     let n = prefs.search_results.clamp(1, 10) as usize;
     let mut hits = match prefs.search_backend.as_str() {
         "searxng" => searxng(query, &prefs.searxng_url).await?,
-        "brave" => brave(query, &prefs.brave_key).await?,
-        "tavily" => tavily(query, &prefs.tavily_key).await?,
+        "brave" => brave(query, &crate::secrets::get("brave")).await?,
+        "tavily" => tavily(query, &crate::secrets::get("tavily")).await?,
         _ => duckduckgo(query).await?,
     };
     hits.truncate(n);

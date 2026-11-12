@@ -685,11 +685,15 @@ fn web_search(page: &Page) {
         false,
         |v| prefs::update(|p| p.searxng_url = v.trim().to_string()),
     );
-    let brave = entry_row(&g, "Brave Search key", "From the Brave Search API dashboard.", &p.brave_key, "API key", true, |v| {
-        prefs::update(|p| p.brave_key = v.trim().to_string())
+    let brave = entry_row(&g, "Brave Search key", "From the Brave Search API dashboard. Kept in your keyring.", &crate::secrets::get("brave"), "API key", true, |v| {
+        if let Err(e) = crate::secrets::set("brave", v.trim()) {
+            crate::window::toast(&e);
+        }
     });
-    let tavily = entry_row(&g, "Tavily key", "From tavily.com.", &p.tavily_key, "API key", true, |v| {
-        prefs::update(|p| p.tavily_key = v.trim().to_string())
+    let tavily = entry_row(&g, "Tavily key", "From tavily.com. Kept in your keyring.", &crate::secrets::get("tavily"), "API key", true, |v| {
+        if let Err(e) = crate::secrets::set("tavily", v.trim()) {
+            crate::window::toast(&e);
+        }
     });
     let show = {
         let (s, b, t) = (searx.clone(), brave.clone(), tavily.clone());
@@ -758,7 +762,7 @@ fn location(page: &Page) {
         widgets::opts(&[
             ("off", "Off"),
             ("desktop", "Desktop location"),
-            ("ip", "Approximate, from IP address"),
+            ("ip", "Approximate, from your IP address (ipapi.co)"),
             ("manual", "Typed in"),
         ]),
         &p.location_mode,
