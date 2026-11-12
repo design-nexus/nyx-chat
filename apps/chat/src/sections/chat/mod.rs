@@ -269,6 +269,9 @@ pub fn build() -> gtk::Widget {
     artifact_box.add_css_class("artifact-panel");
     panel_stack.add_named(&artifact_box, Some("artifact"));
     panel.append(&panel_stack);
+    let panel_line = nyx_ui::frame::pane_line(gtk::Orientation::Vertical);
+    panel.bind_property("visible", &panel_line, "visible").sync_create().build();
+    body.append(&panel_line);
     body.append(&panel);
     root.append(&body);
 
