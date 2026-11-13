@@ -37,33 +37,6 @@ window.chat-window .app-header button.bar-button:hover {
   font-size: 11px;
 }
 
-/* The model server, at the sidebar's foot: its dot, models and switcher. */
-.server-foot {
-  min-height: 40px;
-  padding: 4px 12px 10px;
-}
-
-.server-readout {
-  font-size: 11.5px;
-  color: @theme_dim_text;
-  font-feature-settings: "tnum";
-}
-
-window.chat-window .server-foot dropdown.host-switcher > button {
-  min-width: 0;
-  min-height: 26px;
-  padding: 0 8px;
-  border-color: transparent;
-  background: transparent;
-  font-size: 11.5px;
-  color: @theme_dim_text;
-}
-
-window.chat-window .server-foot dropdown.host-switcher > button:hover {
-  background: @row_hover;
-  color: @theme_text;
-}
-
 .dialog-card .dialog-title {
   font-size: 1.3em;
   font-weight: 600;
@@ -674,42 +647,6 @@ window.chat-window dropdown.model-picker > button {
   margin: 0 24px;
 }
 
-.chat-empty {
-  padding: 40px 0;
-}
-
-.chat-empty-title {
-  color: @theme_dim_text;
-}
-
-.prompt-chips {
-  margin-top: 16px;
-}
-
-.chat-recent {
-  margin-top: 28px;
-}
-
-.chat-recent .group-title {
-  margin: 0 2px 10px;
-}
-
-window.chat-window button.recent-row {
-  min-height: 38px;
-  padding: 0 14px;
-  border-radius: 0;
-  font-weight: 500;
-}
-
-window.chat-window .group-list > button.recent-row:first-child {
-  border-top: none;
-  border-radius: 9px 9px 0 0;
-}
-
-window.chat-window .group-list > button.recent-row:last-child {
-  border-radius: 0 0 9px 9px;
-}
-
 .followups {
   margin-top: 4px;
 }
@@ -732,8 +669,8 @@ window.chat-window button.jump-bottom {
 /* User messages */
 .user-msg {
   padding: 10px 14px;
-  border-radius: var(--nyx-radius-card);
-  background: @lift;
+  border-radius: 16px 16px 4px 16px;
+  background: mix(@theme_card, @theme_accent, 0.16);
   border: none;
 }
 
@@ -802,9 +739,24 @@ window.chat-window button.thumb-btn {
 }
 
 .model-name {
-  font-size: 0.82em;
   font-weight: 600;
-  color: @theme_dim_text;
+  color: @theme_text;
+}
+
+.msg-time {
+  font-size: 0.846em;
+  color: @theme_text_tertiary;
+}
+
+/* The model's mark: a spark on an accent tile. */
+image.spark {
+  min-width: 12px;
+  min-height: 12px;
+  padding: 3px;
+  border-radius: 6px;
+  background: alpha(@theme_accent, 0.2);
+  color: @theme_accent;
+  -gtk-icon-size: 12px;
 }
 
 window.chat-window menubutton.msg-stats > button {
@@ -1009,15 +961,35 @@ window.chat-window button.tool-head image {
 }
 
 .composer {
-  padding: 10px 10px 8px 14px;
-  border-radius: var(--nyx-radius-card);
+  padding: 12px 10px 8px 14px;
+  border-radius: 14px;
   border: none;
   transition: box-shadow 120ms ease-out;
   background: @theme_card;
+  box-shadow: inset 0 0 0 1px @hairline, 0 4px 18px alpha(@theme_shadow, 0.25);
 }
 
 .composer:focus-within {
-  box-shadow: inset 0 0 0 1px alpha(@theme_accent, 0.5);
+  box-shadow: inset 0 0 0 1px alpha(@theme_accent, 0.5), 0 4px 18px alpha(@theme_shadow, 0.25);
+}
+
+/* On Home: the page's one big box. */
+.composer-wrap.big {
+  padding: 0;
+}
+
+.composer-wrap.big textview.composer-text {
+  font-size: 1.077em;
+}
+
+.composer-wrap.big .composer-placeholder {
+  font-size: 1.077em;
+}
+
+.composer-hint {
+  margin: 5px 4px 0 0;
+  font-size: 0.846em;
+  color: alpha(@theme_text_tertiary, 0.85);
 }
 
 textview.composer-text,
@@ -1035,25 +1007,25 @@ textview.composer-text > text {
   margin-top: 2px;
 }
 
-/* Send: round, but tinted like an active message-bar toggle rather than a bright fill. */
+/* Send: a round accent button. */
 window.chat-window button.send-button {
-  min-width: 34px;
-  min-height: 34px;
+  min-width: 32px;
+  min-height: 32px;
   padding: 0;
   border-radius: 999px;
   border: none;
   box-shadow: none;
-  background: alpha(@theme_accent, 0.16);
+  background: @theme_accent;
   background-image: none;
-  color: @theme_accent;
+  color: @theme_on_accent;
 }
 
 window.chat-window button.send-button:hover {
-  background: alpha(@theme_accent, 0.24);
+  background: mix(@theme_accent, @theme_on_accent, 0.12);
 }
 
 window.chat-window button.send-button:active {
-  background: alpha(@theme_accent, 0.30);
+  background: mix(@theme_accent, @theme_bg, 0.15);
 }
 
 window.chat-window button.send-button.destructive-action {
@@ -1384,10 +1356,6 @@ window.chat-window menubutton.bar-menu > button:checked {
   background: alpha(@theme_accent, 0.22);
 }
 
-window.chat-window .group-list > button.recent-row:only-child {
-  border-radius: var(--nyx-radius-card);
-}
-
 /* Numbers that line up. */
 .tnum {
   font-feature-settings: "tnum";
@@ -1398,4 +1366,538 @@ window.chat-window label.value-readout,
 window.chat-window label.kv-value.mono {
   font-family: inherit;
   font-feature-settings: "tnum";
+}
+
+window.chat-window button.danger-text,
+window.chat-window button.danger-text label {
+  color: @theme_danger;
+}
+
+/* ---------- Header: New chat ---------- */
+
+window.chat-window .app-header button.new-chat {
+  min-height: 30px;
+  margin-left: 2px;
+  padding: 0 12px 0 10px;
+  border-radius: var(--nyx-radius-small);
+  font-weight: 600;
+}
+
+window.chat-window .app-header button.new-chat image {
+  -gtk-icon-size: 14px;
+}
+
+.new-chat-key {
+  margin-left: 2px;
+  font-size: 0.846em;
+  font-weight: 500;
+  color: alpha(@theme_on_accent, 0.7);
+}
+
+/* ---------- Sidebar: counts and the rail's group marks ---------- */
+
+.settings-navigation .nav-readout.badge {
+  min-width: 18px;
+  min-height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: alpha(@theme_accent, 0.2);
+  color: @theme_accent;
+  font-weight: 600;
+}
+
+.settings-navigation separator.nav-divider {
+  margin: 8px 14px 6px;
+  min-height: 2px;
+  border-radius: 1px;
+  background: @theme_divider;
+}
+
+/* ---------- Page bars (Chats, Arena) ---------- */
+
+.page-bar {
+  min-height: 50px;
+  padding: 0 12px 0 16px;
+  border-bottom: 1px solid @hairline;
+}
+
+.page-bar-title {
+  font-size: 1.077em;
+  font-weight: 600;
+}
+
+.page-bar-subtitle {
+  color: @theme_text_tertiary;
+}
+
+/* ---------- Home ---------- */
+
+.home-inner {
+  padding: 48px 8px 28px;
+}
+
+.narrow .home-inner {
+  padding-top: 32px;
+}
+
+.arena-page.narrow .arena-body {
+  padding: 16px 16px 24px;
+}
+
+.home-title {
+  margin-bottom: 20px;
+  font-size: 1.846em;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.home-note {
+  margin: -8px 0 14px;
+  color: @theme_dim_text;
+}
+
+.home-prompts {
+  margin: 14px 0 6px;
+}
+
+window.chat-window button.prompt-chip {
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: none;
+  background: @field;
+  box-shadow: inset 0 0 0 1px @hairline;
+  color: @theme_dim_text;
+  font-weight: 400;
+}
+
+window.chat-window button.prompt-chip:hover {
+  background: @row_hover;
+  color: @theme_text;
+}
+
+.prompt-chip-command {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.846em;
+  font-weight: 600;
+  color: @theme_accent;
+}
+
+.home-sechead {
+  margin: 28px 0 10px;
+}
+
+.home-sechead-title {
+  font-weight: 600;
+}
+
+window.chat-window button.link-button {
+  min-height: 24px;
+  padding: 0 4px;
+  border: none;
+  background: none;
+  box-shadow: none;
+  color: @theme_accent;
+  font-weight: 500;
+}
+
+window.chat-window button.link-button:hover {
+  background: alpha(@theme_accent, 0.12);
+}
+
+window.chat-window button.recent-card {
+  padding: 12px 14px;
+  border-radius: var(--nyx-radius-card);
+  border: none;
+  background: @theme_card;
+  box-shadow: inset 0 0 0 1px @hairline;
+  font-weight: 400;
+}
+
+window.chat-window button.recent-card:hover {
+  background: mix(@theme_card, @theme_text, 0.04);
+}
+
+.recent-card-title {
+  font-weight: 600;
+  color: @theme_text;
+}
+
+.recent-card-meta {
+  font-size: 0.846em;
+  color: @theme_text_tertiary;
+}
+
+.recent-card-preview {
+  margin-top: 3px;
+  font-size: 0.923em;
+  color: @theme_dim_text;
+}
+
+.home-week {
+  margin-top: 18px;
+}
+
+.home-kcard,
+.home-status {
+  border-radius: var(--nyx-radius-card);
+  background: @theme_card;
+  box-shadow: inset 0 0 0 1px @hairline;
+}
+
+.home-kcard {
+  padding: 12px 14px;
+}
+
+.home-kcard-key {
+  font-size: 0.846em;
+  font-weight: 500;
+  color: @theme_text_tertiary;
+}
+
+.home-kcard-key image {
+  -gtk-icon-size: 13px;
+}
+
+.home-kcard-value {
+  font-size: 1.231em;
+  font-weight: 600;
+}
+
+.home-status {
+  margin-top: 18px;
+  padding: 10px 12px 10px 14px;
+}
+
+.home-status-title {
+  font-weight: 600;
+}
+
+.home-status-sub {
+  font-size: 0.846em;
+  color: @theme_text_tertiary;
+}
+
+levelbar.home-status-bar {
+  margin: 0 8px 0 16px;
+}
+
+levelbar.home-status-bar > trough,
+levelbar.home-status-bar > trough > block {
+  min-height: 6px;
+}
+
+/* ---------- The message bar's pills ---------- */
+
+window.chat-window button.bar-pill,
+window.chat-window menubutton.bar-pill > button {
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px @hairline;
+  color: @theme_dim_text;
+  font-weight: 500;
+}
+
+window.chat-window button.bar-pill image,
+window.chat-window menubutton.bar-pill > button image {
+  -gtk-icon-size: 14px;
+}
+
+window.chat-window button.bar-pill:hover,
+window.chat-window menubutton.bar-pill > button:hover {
+  background: @row_hover;
+  color: @theme_text;
+}
+
+window.chat-window button.bar-pill:checked,
+window.chat-window menubutton.bar-pill.selected > button {
+  background: alpha(@theme_accent, 0.16);
+  box-shadow: inset 0 0 0 1px alpha(@theme_accent, 0.4);
+  color: @theme_accent;
+}
+
+.pill-count {
+  font-size: 0.846em;
+  color: @theme_text_tertiary;
+}
+
+window.chat-window menubutton.bar-pill.selected .pill-count {
+  color: alpha(@theme_accent, 0.8);
+}
+
+/* ---------- Replies ---------- */
+
+.assistant-msg .msg-actions {
+  opacity: 1;
+}
+
+window.chat-window button.reply-action {
+  min-height: 26px;
+  padding: 0 8px;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  font-size: 0.923em;
+  font-weight: 500;
+  color: @theme_dim_text;
+}
+
+window.chat-window button.reply-action image {
+  -gtk-icon-size: 14px;
+}
+
+window.chat-window button.reply-action:hover {
+  background: @row_hover;
+  color: @theme_text;
+}
+
+window.chat-window menubutton.reply-more > button {
+  min-width: 26px;
+  min-height: 26px;
+  padding: 0;
+  color: @theme_dim_text;
+}
+
+window.chat-window menubutton.msg-stats image {
+  -gtk-icon-size: 12px;
+}
+
+window.chat-window .followups button.chip {
+  min-height: 28px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px alpha(@theme_accent, 0.35);
+  color: @theme_accent;
+  font-weight: 500;
+}
+
+window.chat-window .followups button.chip:hover {
+  background: alpha(@theme_accent, 0.1);
+}
+
+/* ---------- Chats ---------- */
+
+.chats-body {
+  padding: 16px 24px 32px;
+}
+
+.chats-page.narrow .chats-body {
+  padding: 12px 16px 24px;
+}
+
+window.chat-window entry.chats-search {
+  min-height: 34px;
+  margin-bottom: 6px;
+}
+
+.chats-page .nav-group {
+  margin: 18px 4px 6px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid @hairline;
+}
+
+.chats-page .nav-group-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: @theme_text_tertiary;
+}
+
+.chats-page button.chat-item {
+  min-height: 38px;
+}
+
+.chat-meta {
+  margin-right: 30px;
+  font-size: 0.846em;
+  font-weight: 400;
+  color: @theme_text_tertiary;
+}
+
+/* ---------- Arena ---------- */
+
+.arena-body {
+  padding: 20px 24px 28px;
+}
+
+.arena-ask {
+  padding: 12px 14px;
+  border-radius: var(--nyx-radius-card);
+  background: @theme_card;
+  box-shadow: inset 0 0 0 1px @hairline;
+}
+
+.arena-ask .text-area-frame {
+  background: @field;
+}
+
+.arena-placeholder {
+  margin: 8px 10px;
+  color: @theme_text_tertiary;
+}
+
+.arena-pickers .field-label {
+  margin: 0 0 0 4px;
+}
+
+window.chat-window .arena-pickers dropdown > button {
+  min-width: 0;
+}
+
+.arena-note {
+  font-size: 0.846em;
+  color: @theme_text_tertiary;
+}
+
+.arena-question {
+  padding: 12px 14px;
+  border-radius: var(--nyx-radius-card);
+  background: mix(@theme_card, @theme_accent, 0.12);
+}
+
+.arena-question image {
+  color: @theme_accent;
+}
+
+.arena-answer {
+  min-height: 160px;
+  padding: 14px 16px;
+  border-radius: var(--nyx-radius-card);
+  background: @theme_card;
+  box-shadow: inset 0 0 0 1px @hairline;
+}
+
+.arena-answer-name {
+  font-weight: 600;
+}
+
+.arena-answer-model {
+  font-size: 0.846em;
+  color: @theme_text_tertiary;
+}
+
+.arena-answer-model.revealed {
+  font-weight: 600;
+  color: @theme_accent;
+}
+
+window.chat-window button.arena-vote {
+  min-height: 32px;
+  padding: 0 14px;
+}
+
+.arena-sechead {
+  margin: 10px 2px 0;
+  font-weight: 600;
+}
+
+.arena-rounds {
+  border-radius: var(--nyx-radius-card);
+  background: @theme_card;
+  box-shadow: inset 0 0 0 1px @hairline;
+}
+
+.round-row {
+  min-height: 40px;
+  padding: 6px 14px;
+  border-top: 1px solid @hairline;
+}
+
+.round-row:first-child {
+  border-top: none;
+}
+
+.round-won {
+  color: @theme_success;
+}
+
+.round-even {
+  color: @theme_dim_text;
+}
+
+.round-result {
+  font-size: 0.923em;
+  color: @theme_dim_text;
+}
+
+.arena-side {
+  min-width: 280px;
+}
+
+.arena-board {
+  padding: 16px;
+}
+
+.arena-body > .arena-board {
+  padding: 4px 2px;
+}
+
+.arena-board-head {
+  margin-bottom: 6px;
+}
+
+.arena-board-title {
+  font-size: 1.077em;
+  font-weight: 600;
+}
+
+.arena-board-count {
+  font-size: 0.846em;
+  color: @theme_text_tertiary;
+}
+
+.arena-board-empty {
+  margin: 18px 0;
+}
+
+.board-row {
+  padding: 8px 4px;
+  border-bottom: 1px solid @hairline;
+}
+
+.board-rank {
+  min-width: 22px;
+  min-height: 22px;
+  border-radius: 999px;
+  background: @field;
+  font-size: 0.846em;
+  font-weight: 600;
+  color: @theme_text;
+}
+
+.board-rank.first {
+  background: alpha(@theme_warning, 0.25);
+  color: @theme_warning;
+}
+
+.board-model {
+  font-weight: 500;
+}
+
+.board-record {
+  font-size: 0.77em;
+  color: @theme_text_tertiary;
+}
+
+.board-score {
+  font-weight: 600;
+}
+
+window.chat-window button.arena-reset {
+  margin-top: 12px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  font-size: 0.923em;
+}
+
+window.chat-window button.arena-reset:hover {
+  background: alpha(@theme_danger, 0.12);
 }

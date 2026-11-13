@@ -1,7 +1,9 @@
 //! The chat page: header with the model picker, the conversation, the
-//! composer, and a side panel for per-chat settings and previews.
+//! composer, and a side panel for per-chat settings and previews. Before
+//! anything is sent it's Home, with the composer in the middle of the page.
 
 mod composer;
+mod home;
 mod live;
 mod panel;
 mod send;
@@ -27,15 +29,22 @@ pub(crate) struct Page {
     banners: gtk::Box,
     scroller: gtk::ScrolledWindow,
     column: gtk::Box,
-    empty: gtk::Box,
+    home: home::Home,
+    /// Home is showing: nothing has been sent in this chat yet.
+    at_home: Cell<bool>,
     /// Replies being written right now, side by side when comparing.
     live_box: gtk::Box,
     composer: Rc<composer::Composer>,
+    /// The composer's place under the conversation, and the footer around it.
+    composer_holder: gtk::Box,
+    footer: gtk::Box,
+    /// The conversation's actions in the header.
+    actions: gtk::Box,
+    settings_btn: gtk::ToggleButton,
     panel: gtk::Box,
     panel_stack: gtk::Stack,
     settings_box: gtk::Box,
     artifact_box: gtk::Box,
-    history_btn: gtk::MenuButton,
     jump: gtk::Button,
     follow: Cell<bool>,
     pub(crate) st: RefCell<State>,
@@ -85,19 +94,6 @@ pub fn title() -> String {
     page().map(|p| p.st.borrow().chat().title.clone()).filter(|t| !t.is_empty()).unwrap_or_else(|| "New chat".into())
 }
 
-/// 3.1k, 8k, 128k.
-pub(crate) fn short_count(n: u64) -> String {
-    if n < 1000 {
-        n.to_string()
-    } else if n.is_multiple_of(1024) {
-        format!("{}k", n / 1024)
-    } else if n < 10_000 {
-        format!("{:.1}k", n as f64 / 1000.0)
-    } else {
-        format!("{}k", (n as f64 / 1000.0).round())
-    }
-}
-
 fn draft_chat(folder: Option<i64>, temporary: bool) -> Chat {
     let f = folder.and_then(store::folder);
     let model = f.as_ref().map(|f| f.model.clone()).filter(|m| !m.is_empty()).unwrap_or_else(models::default_model);
@@ -114,38 +110,10 @@ pub fn build() -> gtk::Widget {
     root.add_css_class("chat-page");
 
     // ----- In the window's header -----
-    // The model picker in the middle; the chat list button (narrow windows) at the
-    // start and the chat's actions at the end, beside the window's own buttons.
-    let start = widgets::hbox(2);
+    // The model picker in the middle; in a conversation, its actions at the end,
+    // beside the window's own buttons.
     let end = widgets::hbox(2);
     end.add_css_class("chat-actions");
-    let history_btn = gtk::MenuButton::new();
-    history_btn.set_icon_name("view-list-symbolic");
-    history_btn.add_css_class("tool-button");
-    history_btn.set_tooltip_text(Some("Chats"));
-    history_btn.set_visible(false);
-    let pop = gtk::Popover::new();
-    pop.add_css_class("history-popover");
-    let hist = widgets::vbox(6);
-    hist.set_size_request(300, 460);
-    let hsearch = gtk::SearchEntry::new();
-    hsearch.set_placeholder_text(Some("Search chats"));
-    hsearch.add_css_class("settings-search");
-    let new_btn = gtk::Button::with_label("New chat");
-    new_btn.add_css_class("suggested-action");
-    let p2 = pop.clone();
-    new_btn.connect_clicked(move |_| {
-        p2.popdown();
-        new_chat(None);
-    });
-    hist.append(&new_btn);
-    hist.append(&hsearch);
-    let hlist = chatlist::build(&hsearch, true);
-    hlist.set_vexpand(true);
-    hist.append(&hlist);
-    pop.set_child(Some(&hist));
-    history_btn.set_popover(Some(&pop));
-    start.append(&history_btn);
 
     // The load bar runs along the picker's bottom edge, so the picker is as
     // tall as the buttons beside it.
@@ -202,7 +170,7 @@ pub fn build() -> gtk::Widget {
         }
     });
     end.append(&more);
-    window::set_chat_header(&start, &middle, &end);
+    window::set_chat_header(&middle, &end);
 
     let banners = widgets::vbox(0);
     banners.add_css_class("chat-banners");
@@ -216,11 +184,11 @@ pub fn build() -> gtk::Widget {
 
     let column = widgets::vbox(18);
     column.add_css_class("messages");
-    let empty = view::empty_state();
+    let home = home::build();
     let col_wrap = widgets::vbox(0);
     col_wrap.add_css_class("messages-wrap");
-    col_wrap.append(&empty);
-    col_wrap.append(&crate::clamp::Clamp::new(&column, 860));
+    col_wrap.append(&home.root);
+    col_wrap.append(&crate::clamp::Clamp::new(&column, 780));
     let live_box = widgets::hbox(14);
     live_box.add_css_class("live-box");
     live_box.set_homogeneous(true);
@@ -242,7 +210,9 @@ pub fn build() -> gtk::Widget {
     center.append(&overlay);
 
     let composer = composer::Composer::new();
-    let composer_clamp = crate::clamp::Clamp::new(&composer.root, 860);
+    let composer_holder = widgets::vbox(0);
+    composer_holder.append(&composer.root);
+    let composer_clamp = crate::clamp::Clamp::new(&composer_holder, 780);
     composer_clamp.add_css_class("composer-clamp");
     // The message bar is its own solid footer under the conversation, not a
     // card floating over it: the chat view ends where the footer begins.
@@ -285,14 +255,18 @@ pub fn build() -> gtk::Widget {
         banners,
         scroller: scroller.clone(),
         column: column.clone(),
-        empty,
+        home,
+        at_home: Cell::new(false),
         live_box,
         composer,
+        composer_holder,
+        footer: footer.clone(),
+        actions: end.clone(),
+        settings_btn: settings_btn.clone(),
         panel: panel.clone(),
         panel_stack: panel_stack.clone(),
         settings_box,
         artifact_box,
-        history_btn: history_btn.clone(),
         jump: jump.clone(),
         follow: Cell::new(true),
         st: RefCell::new(State { draft: draft_chat(None, false), ..Default::default() }),
@@ -419,11 +393,21 @@ pub fn build() -> gtk::Widget {
     root.add_controller(drop);
 
     window::on_narrow({
-        let hb = history_btn.clone();
         let lb = pg.live_box.clone();
+        let col = pg.column.clone();
         move |narrow| {
-            hb.set_visible(narrow);
             lb.set_orientation(if narrow { gtk::Orientation::Vertical } else { gtk::Orientation::Horizontal });
+            fn walk(w: &gtk::Widget, narrow: bool) {
+                if w.has_css_class("wide-only") {
+                    w.set_visible(!narrow);
+                }
+                let mut c = w.first_child();
+                while let Some(x) = c {
+                    walk(&x, narrow);
+                    c = x.next_sibling();
+                }
+            }
+            walk(col.upcast_ref(), narrow);
         }
     });
 
@@ -460,16 +444,83 @@ pub fn build() -> gtk::Widget {
         }
     });
 
-    // Open the last chat.
-    let last_chat = prefs::get().last_chat;
-    if last_chat > 0 && store::chat(last_chat).ok().flatten().is_some_and(|c| !c.archived) {
-        show(&pg, last_chat);
-    } else {
-        render(&pg);
-        refresh_header(&pg);
-    }
+    // Home's cards and figures follow the chats.
+    let p2 = Rc::downgrade(&pg);
+    hub::on(&hub::CHATS, &root, move || {
+        if let Some(p) = p2.upgrade()
+            && p.at_home.get()
+        {
+            home::fill(&p);
+        }
+    });
+    let p2 = Rc::downgrade(&pg);
+    hub::on(&hub::LIBRARY, &root, move || {
+        if let Some(p) = p2.upgrade()
+            && p.at_home.get()
+        {
+            home::fill(&p);
+        }
+    });
+
+    // The page opens as Home; the last chats are a click away on it.
+    render(&pg);
+    refresh_header(&pg);
     refresh_banners(&pg);
     root.upcast()
+}
+
+/// Show Home or the conversation: on Home the composer sits under the heading, the
+/// footer and the conversation's actions go, and so does the side panel.
+pub(crate) fn set_home(p: &Page, on: bool) {
+    let was = p.at_home.replace(on);
+    let root = p.composer.root.clone();
+    let target = if on { &p.home.slot } else { &p.composer_holder };
+    if root.parent().as_ref() != Some(target.upcast_ref::<gtk::Widget>()) {
+        let focused = root.focus_child().is_some();
+        if let Some(parent) = root.parent().and_downcast::<gtk::Box>() {
+            parent.remove(&root);
+        }
+        target.append(&root);
+        if focused || (was && !on) {
+            p.composer.focus();
+        }
+    }
+    p.composer.set_home(on);
+    p.home.root.set_visible(on);
+    p.footer.set_visible(!on);
+    p.actions.set_visible(!on);
+    if on && p.settings_btn.is_active() {
+        p.settings_btn.set_active(false);
+    }
+    if was != on {
+        refresh_banners(p);
+        window::refresh_nav();
+        window::refresh_crumb();
+    }
+}
+
+/// Home is on screen (or would be, on the chat page).
+pub fn is_home() -> bool {
+    page().is_some_and(|p| p.at_home.get())
+}
+
+/// Go Home: a new chat, unless the one on screen hasn't been sent yet.
+pub fn show_home() {
+    let Some(p) = page() else { return };
+    if p.at_home.get() && p.st.borrow().chat.is_none() {
+        return;
+    }
+    reset_draft(&p, None, false);
+}
+
+/// Open the model picker in the header.
+pub(crate) fn open_picker() {
+    let Some(p) = page() else { return };
+    if p.model_dd.is_sensitive() {
+        p.model_dd.emit_by_name::<()>("activate", &[]);
+    } else {
+        window::navigate("models");
+    }
 }
 
 pub(crate) fn save_chat(p: &Page) {
@@ -580,7 +631,6 @@ pub(crate) fn refresh_header(p: &Page) {
     p.compare_btn.set_visible(models::chat_models().len() > 1);
     p.composer.refresh();
     refresh_load(p);
-    view::refresh_empty(p);
     refresh_context(p);
     window::refresh_crumb();
     window::set_temporary_toggle(p.st.borrow().chat().temporary);
@@ -635,6 +685,9 @@ pub(crate) fn refresh_load(p: &Page) {
         format!("{model}\nNot loaded yet; it loads with the first message")
     };
     p.model_dd.set_tooltip_text(Some(&tip));
+    if p.at_home.get() {
+        home::refresh(p);
+    }
 }
 
 /// Offline server, missing model, temporary chat.
@@ -665,6 +718,10 @@ pub(crate) fn refresh_banners(p: &Page) {
         });
         b.append(&keep);
         p.banners.append(&b);
+    }
+    // Home's status card says this instead.
+    if p.at_home.get() {
+        return;
     }
     match models::online() {
         Some(false) => {
@@ -821,6 +878,12 @@ pub fn new_chat(folder: Option<i64>) {
 fn start_chat(folder: Option<i64>, temporary: bool) {
     window::navigate("chat");
     let Some(p) = page() else { return };
+    reset_draft(&p, folder, temporary);
+}
+
+/// Put a new, unsent chat on the page: Home.
+fn reset_draft(p: &Rc<Page>, folder: Option<i64>, temporary: bool) {
+    let p = p.clone();
     leave(&p, None);
     {
         let mut st = p.st.borrow_mut();
@@ -863,12 +926,6 @@ pub fn closed(id: i64) {
             p.st.borrow_mut().chat = None;
         }
         new_chat(None);
-    }
-}
-
-pub fn open_history() {
-    if let Some(p) = page() {
-        p.history_btn.popup();
     }
 }
 

@@ -83,6 +83,32 @@ impl Page {
     }
 }
 
+/// A page's own title bar: its name, a line saying what it is, and its actions at the end.
+pub fn page_bar(title: &str, subtitle: &str) -> (gtk::Box, gtk::Label, gtk::Box) {
+    let bar = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+    bar.add_css_class("page-bar");
+    bar.append(&label(title, "page-bar-title"));
+    let sub = label(subtitle, "page-bar-subtitle");
+    sub.set_ellipsize(pango::EllipsizeMode::End);
+    sub.set_hexpand(true);
+    sub.set_xalign(0.0);
+    bar.append(&sub);
+    let end = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    bar.append(&end);
+    (bar, sub, end)
+}
+
+/// A button with an icon before its label.
+pub fn icon_label_button(icon: &str, text: &str) -> gtk::Button {
+    let b = gtk::Button::new();
+    let row = hbox(6);
+    row.append(&gtk::Image::from_icon_name(icon));
+    row.append(&label(text, ""));
+    b.set_child(Some(&row));
+    b.set_valign(gtk::Align::Center);
+    b
+}
+
 #[derive(Clone)]
 pub struct Group {
     pub wrapper: gtk::Box,

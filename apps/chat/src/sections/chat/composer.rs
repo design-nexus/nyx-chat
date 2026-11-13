@@ -28,18 +28,29 @@ pub struct Composer {
     pub root: gtk::Box,
     strip: gtk::Box,
     text: gtk::TextView,
+    text_scroll: gtk::ScrolledWindow,
+    placeholder: gtk::Label,
+    /// "/ prompts · @ model · # knowledge", on Home in wide windows.
+    hint: gtk::Label,
     send: gtk::Button,
     mic: gtk::Button,
     web: gtk::ToggleButton,
-    location: gtk::ToggleButton,
+    web_label: gtk::Label,
     think: gtk::ToggleButton,
+    think_label: gtk::Label,
     tools_btn: gtk::MenuButton,
+    tools_label: gtk::Label,
+    tools_count: gtk::Label,
     kb_btn: gtk::MenuButton,
-    /// How full the context is, after the tool icons.
+    kb_label: gtk::Label,
+    /// How full the model's memory is with this chat, after the toggles.
     ctx: gtk::Box,
-    ctx_bar: gtk::LevelBar,
+    ctx_ring: gtk::DrawingArea,
+    ctx_frac: Rc<Cell<f64>>,
     ctx_label: gtk::Label,
     reasoning: gtk::MenuButton,
+    /// The composer sits on Home, big.
+    home: Cell<bool>,
     note: gtk::Label,
     attachments: RefCell<Vec<Attachment>>,
     streaming: Cell<bool>,
@@ -60,14 +71,65 @@ fn square(w: &impl IsA<gtk::Widget>) {
     w.set_valign(gtk::Align::Center);
 }
 
-/// A compact on/off icon button for the message bar.
-fn chip(icon: &str, tip: &str) -> gtk::ToggleButton {
+/// An on/off pill for the message bar: icon and name.
+fn chip(icon: &str, text: &str, tip: &str) -> (gtk::ToggleButton, gtk::Label) {
     let b = gtk::ToggleButton::new();
-    b.set_icon_name(icon);
-    b.add_css_class("bar-toggle");
+    b.add_css_class("bar-pill");
+    let row = widgets::hbox(6);
+    row.append(&gtk::Image::from_icon_name(icon));
+    let l = widgets::label(text, "");
+    row.append(&l);
+    b.set_child(Some(&row));
     b.set_tooltip_text(Some(tip));
-    square(&b);
-    b
+    b.set_valign(gtk::Align::Center);
+    (b, l)
+}
+
+/// A pill that opens a menu: icon, name and an optional count.
+fn menu_pill(icon: &str, text: &str, tip: &str) -> (gtk::MenuButton, gtk::Label, gtk::Label) {
+    let b = gtk::MenuButton::new();
+    b.add_css_class("bar-pill");
+    let row = widgets::hbox(6);
+    row.append(&gtk::Image::from_icon_name(icon));
+    let l = widgets::label(text, "");
+    row.append(&l);
+    let n = widgets::label("", "pill-count");
+    n.add_css_class("tnum");
+    row.append(&n);
+    b.set_child(Some(&row));
+    b.set_tooltip_text(Some(tip));
+    b.set_valign(gtk::Align::Center);
+    (b, l, n)
+}
+
+/// The memory ring: how much of the model's context the chat fills.
+fn ring(frac: Rc<Cell<f64>>) -> gtk::DrawingArea {
+    let ring = gtk::DrawingArea::new();
+    ring.set_content_width(18);
+    ring.set_content_height(18);
+    ring.set_valign(gtk::Align::Center);
+    ring.set_draw_func(move |w, cr, width, height| {
+        let (cx, cy) = (width as f64 / 2.0, height as f64 / 2.0);
+        let r = cx.min(cy) - 2.0;
+        let fg = w.color();
+        cr.set_line_width(3.0);
+        cr.set_source_rgba(fg.red() as f64, fg.green() as f64, fg.blue() as f64, 0.22);
+        cr.arc(cx, cy, r, 0.0, std::f64::consts::TAU);
+        let _ = cr.stroke();
+        let f = frac.get().clamp(0.0, 1.0);
+        if f > 0.0 {
+            let c = if w.parent().is_some_and(|p| p.has_css_class("hot")) {
+                crate::theme::Rgb::hex(&crate::theme::palette().danger)
+            } else {
+                crate::theme::Rgb::hex(&crate::theme::palette().accent)
+            };
+            cr.set_source_rgb(c.0, c.1, c.2);
+            let start = -std::f64::consts::FRAC_PI_2;
+            cr.arc(cx, cy, r, start, start + f * std::f64::consts::TAU);
+            let _ = cr.stroke();
+        }
+    });
+    ring
 }
 
 /// Switch the chat on screen to `name`, as if picked in the picker.
@@ -99,8 +161,11 @@ impl Composer {
         text.set_accepts_tab(false);
         text.set_top_margin(4);
         text.set_bottom_margin(4);
-        let placeholder = widgets::label("Message", "composer-placeholder");
+        let placeholder = widgets::label("Ask a follow-up…", "composer-placeholder");
         placeholder.set_can_target(false);
+        let hint = widgets::label("/ prompts · @ model · # knowledge", "composer-hint");
+        hint.set_can_target(false);
+        hint.set_visible(false);
         let tover = gtk::Overlay::new();
         let tscroll = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
@@ -113,67 +178,74 @@ impl Composer {
         placeholder.set_valign(gtk::Align::Start);
         placeholder.set_halign(gtk::Align::Start);
         tover.add_overlay(&placeholder);
+        hint.set_valign(gtk::Align::Start);
+        hint.set_halign(gtk::Align::End);
+        tover.add_overlay(&hint);
         frame.append(&tover);
         let ph = placeholder.clone();
         text.buffer().connect_changed(move |b| ph.set_visible(b.char_count() == 0));
 
         let row = widgets::hbox(6);
         row.add_css_class("composer-row");
-        let attach = gtk::Button::from_icon_name("mail-attachment-symbolic");
-        attach.add_css_class("flat");
-        attach.add_css_class("bar-toggle");
-        attach.set_tooltip_text(Some("Attach images or files"));
+        // Files, images and screenshots, from one +.
+        let attach = gtk::MenuButton::new();
+        attach.set_icon_name("list-add-symbolic");
+        attach.add_css_class("bar-menu");
+        attach.set_tooltip_text(Some("Attach a file, image or screenshot"));
         square(&attach);
+        let attach_pop = gtk::Popover::new();
+        attach_pop.add_css_class("menu");
+        let attach_list = widgets::vbox(1);
+        let files = gtk::Button::with_label("Attach files or images…");
+        let shot = gtk::Button::with_label("Screenshot of an area  (Ctrl+Shift+S)");
+        for b in [&files, &shot] {
+            b.add_css_class("flat");
+            b.add_css_class("menu-row");
+            if let Some(l) = b.child().and_downcast::<gtk::Label>() {
+                l.set_xalign(0.0);
+            }
+            let p = attach_pop.clone();
+            b.connect_clicked(move |_| p.popdown());
+            attach_list.append(b);
+        }
+        attach_pop.set_child(Some(&attach_list));
+        attach.set_popover(Some(&attach_pop));
         row.append(&attach);
-        let shot = gtk::Button::from_icon_name("camera-photo-symbolic");
-        shot.add_css_class("flat");
-        shot.add_css_class("bar-toggle");
-        shot.set_tooltip_text(Some("Attach a screenshot of an area (Ctrl+Shift+S)"));
-        square(&shot);
-        row.append(&shot);
 
         let chips = widgets::hbox(6);
         chips.set_hexpand(true);
-        let web = chip("web-browser-symbolic", "Web search");
-        let location = chip("mark-location-symbolic", "Location: let the model ask where you are");
-        let think = chip("emoji-objects-symbolic", "Think before answering");
-        let tools_btn = gtk::MenuButton::new();
-        tools_btn.set_icon_name("applications-engineering-symbolic");
-        tools_btn.add_css_class("bar-menu");
-        tools_btn.set_tooltip_text(Some("Tools for this chat"));
-        square(&tools_btn);
-        let kb_btn = gtk::MenuButton::new();
-        kb_btn.set_icon_name("accessories-dictionary-symbolic");
-        kb_btn.add_css_class("bar-menu");
-        kb_btn.set_tooltip_text(Some("Knowledge: answer from your documents (#)"));
-        square(&kb_btn);
+        let (web, web_label) = chip("web-browser-symbolic", "Web search", "Web search");
+        let (think, think_label) = chip("emoji-objects-symbolic", "Think", "Think before answering");
+        let (tools_btn, tools_label, tools_count) =
+            menu_pill("applications-engineering-symbolic", "Tools", "Tools for this chat (location, calculator, files…)");
+        let (kb_btn, kb_label, _) = menu_pill("accessories-dictionary-symbolic", "Knowledge", "Knowledge: answer from your documents (#)");
+        let reasoning = gtk::MenuButton::new();
+        reasoning.add_css_class("reasoning-level");
+        reasoning.set_tooltip_text(Some("Reasoning effort for this chat"));
+        reasoning.set_visible(false);
         for w in [
             web.upcast_ref::<gtk::Widget>(),
-            location.upcast_ref(),
             think.upcast_ref(),
+            reasoning.upcast_ref(),
             tools_btn.upcast_ref(),
             kb_btn.upcast_ref(),
         ] {
             chips.append(w);
         }
-        // Context use: a short bar and "3.1k / 8k", quiet like the icons beside it.
+        let fill = widgets::hbox(0);
+        fill.set_hexpand(true);
+        chips.append(&fill);
+        // Memory use: a ring and "14% of memory", quiet like the pills beside it.
         let ctx = widgets::hbox(6);
         ctx.add_css_class("ctx-readout");
         ctx.set_valign(gtk::Align::Center);
         ctx.set_visible(false);
-        let ctx_bar = widgets::usage_bar();
-        ctx_bar.add_css_class("ctx-bar");
-        ctx_bar.set_hexpand(false);
-        ctx_bar.set_size_request(28, -1);
+        let ctx_frac = Rc::new(Cell::new(0.0));
+        let ctx_ring = ring(ctx_frac.clone());
         let ctx_label = widgets::label("", "ctx-label");
-        ctx.append(&ctx_bar);
+        ctx.append(&ctx_ring);
         ctx.append(&ctx_label);
         chips.append(&ctx);
-        let reasoning = gtk::MenuButton::new();
-        reasoning.add_css_class("reasoning-level");
-        reasoning.set_tooltip_text(Some("Reasoning effort for this chat"));
-        reasoning.set_visible(false);
-        chips.append(&reasoning);
         // Chips wrap away on narrow windows rather than widening them.
         let chip_scroll = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::External)
@@ -223,17 +295,26 @@ impl Composer {
             root,
             strip,
             text,
+            text_scroll: tscroll,
+            placeholder,
+            hint,
             send,
             mic,
             web,
-            location,
+            web_label,
             think,
+            think_label,
             tools_btn,
+            tools_label,
+            tools_count,
             kb_btn,
+            kb_label,
             ctx,
-            ctx_bar,
+            ctx_ring,
+            ctx_frac,
             ctx_label,
             reasoning,
+            home: Cell::new(false),
             note,
             attachments: RefCell::new(Vec::new()),
             streaming: Cell::new(false),
@@ -243,8 +324,39 @@ impl Composer {
             suggest_items: RefCell::new(Vec::new()),
             syncing: Cell::new(false),
         });
-        c.connect(&attach, &shot);
+        c.connect(&files, &shot);
+        let me = Rc::downgrade(&c);
+        window::on_narrow(move |_| {
+            if let Some(c) = me.upgrade() {
+                c.sync_labels();
+            }
+        });
         c
+    }
+
+    /// Home's big box, or the bar under a conversation.
+    pub fn set_home(&self, on: bool) {
+        self.home.set(on);
+        if on {
+            self.root.add_css_class("big");
+        } else {
+            self.root.remove_css_class("big");
+        }
+        self.text_scroll.set_min_content_height(if on { 60 } else { -1 });
+        self.placeholder.set_text(if on { "Ask anything, or drop a file here" } else { "Ask a follow-up…" });
+        self.sync_labels();
+    }
+
+    /// Pills keep their names in wide windows; in narrow ones only the ones that are on.
+    fn sync_labels(&self) {
+        let narrow = window::narrow();
+        let home = self.home.get();
+        self.web_label.set_visible(!narrow || self.web.is_active());
+        self.think_label.set_visible(!narrow || self.think.is_active());
+        self.tools_label.set_visible(!narrow);
+        self.kb_label.set_visible(home && !narrow);
+        self.hint.set_visible(home && !narrow);
+        self.ctx_label.set_visible(!narrow);
     }
 
     fn connect(self: &Rc<Self>, attach: &gtk::Button, shot: &gtk::Button) {
@@ -290,29 +402,24 @@ impl Composer {
         // Tool chips change this chat's tool list.
         let me = Rc::downgrade(self);
         self.web.connect_toggled(move |b| {
-            if let Some(c) = me.upgrade()
-                && !c.syncing.get()
-            {
-                set_tools(&["web_search", "web_fetch"], b.is_active());
-            }
-        });
-        let me = Rc::downgrade(self);
-        self.location.connect_toggled(move |b| {
-            if let Some(c) = me.upgrade()
-                && !c.syncing.get()
-            {
-                set_tools(&["get_location"], b.is_active());
+            if let Some(c) = me.upgrade() {
+                c.sync_labels();
+                if !c.syncing.get() {
+                    set_tools(&["web_search", "web_fetch"], b.is_active());
+                }
             }
         });
         let me = Rc::downgrade(self);
         self.think.connect_toggled(move |b| {
-            if let Some(c) = me.upgrade()
-                && !c.syncing.get()
-                && let Some(p) = super::page()
-            {
-                p.st.borrow_mut().chat_mut().params.think = Some(b.is_active());
-                super::save_chat(&p);
-                c.reasoning.set_sensitive(b.is_active());
+            if let Some(c) = me.upgrade() {
+                c.sync_labels();
+                if !c.syncing.get()
+                    && let Some(p) = super::page()
+                {
+                    p.st.borrow_mut().chat_mut().params.think = Some(b.is_active());
+                    super::save_chat(&p);
+                    c.reasoning.set_sensitive(b.is_active());
+                }
             }
         });
         self.reasoning.set_create_popup_func(|m| m.set_popover(Some(&reasoning_popover())));
@@ -444,15 +551,16 @@ impl Composer {
             return;
         };
         let f = (used as f64 / limit as f64).min(1.0);
-        self.ctx_bar.set_value(f);
-        self.ctx_label.set_text(&format!("{} / {}", super::short_count(used), super::short_count(limit)));
+        self.ctx_frac.set(f);
+        self.ctx_ring.queue_draw();
+        self.ctx_label.set_text(&format!("{:.0}% of memory", (f * 100.0).max(1.0)));
         if f >= 0.9 {
             self.ctx.add_css_class("hot");
         } else {
             self.ctx.remove_css_class("hot");
         }
         self.ctx.set_tooltip_text(Some(&format!(
-            "Context: {} of {} tokens used ({:.0}%)",
+            "How much of the model's memory this chat uses: {} of {} tokens ({:.0}%)",
             util::count(used),
             util::count(limit),
             f * 100.0
@@ -514,8 +622,20 @@ impl Composer {
             chat.params.tools.as_ref().is_some_and(|t| t.iter().any(|x| x == "web_search"))
         };
         self.web.set_active(web_on);
-        self.location.set_visible(pr.location_mode != "off" && tools_ok);
-        self.location.set_active(enabled.iter().any(|t| t == "get_location"));
+        // Web search has its own pill; the rest count under Tools.
+        let others = tools::BUILTIN
+            .iter()
+            .filter(|t| !matches!(t.name, "web_search" | "web_fetch"))
+            .filter(|t| t.name != "get_location" || pr.location_mode != "off")
+            .filter(|t| enabled.iter().any(|e| e == t.name))
+            .count();
+        self.tools_count.set_text(&if tools_ok && others > 0 { others.to_string() } else { String::new() });
+        self.tools_count.set_visible(tools_ok && others > 0);
+        if tools_ok && others > 0 {
+            self.tools_btn.add_css_class("selected");
+        } else {
+            self.tools_btn.remove_css_class("selected");
+        }
         let thinks = info.as_ref().is_some_and(|i| i.has("thinking"));
         self.think.set_visible(thinks);
         self.think.set_active(chat.params.think.unwrap_or(pr.think));
@@ -550,6 +670,7 @@ impl Composer {
         }
         self.note.set_text(&notes.join(" · "));
         self.note.set_visible(!notes.is_empty());
+        self.sync_labels();
     }
 
     // ---------- Suggestions: / prompts, @ models, # knowledge ----------

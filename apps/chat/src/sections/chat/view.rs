@@ -12,92 +12,6 @@ use crate::ollama::chat::{Stats, ToolCall};
 use crate::store::{self, Message, Source};
 use crate::{jsonview, tools, util, widgets, window};
 
-/// What a new chat shows: the model, saved prompts and recent chats.
-pub(super) fn empty_state() -> gtk::Box {
-    let b = widgets::vbox(0);
-    b.add_css_class("chat-empty");
-    b.set_valign(gtk::Align::Center);
-    b.set_halign(gtk::Align::Center);
-    b.set_vexpand(true);
-    b.set_size_request(320, -1);
-    let sub = widgets::label("", "chat-empty-title");
-    sub.set_xalign(0.5);
-    sub.set_wrap(true);
-    b.append(&sub);
-    let chips = gtk::FlowBox::new();
-    chips.set_selection_mode(gtk::SelectionMode::None);
-    chips.set_halign(gtk::Align::Center);
-    chips.set_max_children_per_line(3);
-    chips.set_column_spacing(6);
-    chips.set_row_spacing(6);
-    chips.add_css_class("prompt-chips");
-    b.append(&chips);
-    let recent = widgets::vbox(0);
-    recent.add_css_class("chat-recent");
-    b.append(&recent);
-    b
-}
-
-/// Keep "Chatting with …" in step with the picker.
-pub(super) fn refresh_empty(p: &Page) {
-    let Some(sub) = p.empty.first_child().and_downcast::<gtk::Label>() else { return };
-    let (model, temporary) = {
-        let st = p.st.borrow();
-        (st.chat().model.clone(), st.chat().temporary)
-    };
-    let text = match (model.is_empty(), temporary) {
-        (true, _) => "Pick a model to start".to_string(),
-        (false, true) => format!("A temporary chat with {}", util::model_label(&model)),
-        (false, false) => format!("Chatting with {}", util::model_label(&model)),
-    };
-    sub.set_text(&text);
-}
-
-fn fill_empty(p: &Page) {
-    refresh_empty(p);
-    let Some(chips) = p.empty.first_child().and_then(|w| w.next_sibling()).and_downcast::<gtk::FlowBox>() else { return };
-    chips.remove_all();
-    let prompts = store::prompts().unwrap_or_default();
-    chips.set_visible(!prompts.is_empty());
-    for pr in prompts.into_iter().take(6) {
-        let b = gtk::Button::with_label(if pr.title.is_empty() { &pr.command } else { &pr.title });
-        b.add_css_class("chip");
-        b.set_tooltip_text(Some(&util::clip(&pr.content, 200)));
-        b.connect_clicked(move |_| {
-            if let Some(p) = super::page() {
-                p.composer.insert_prompt(&pr.content);
-            }
-        });
-        chips.insert(&b, -1);
-    }
-    let Some(recent) = chips.next_sibling().and_downcast::<gtk::Box>() else { return };
-    widgets::clear(&recent);
-    let chats: Vec<store::Chat> = store::chats(false).unwrap_or_default().into_iter().take(5).collect();
-    if chats.is_empty() {
-        recent.set_visible(false);
-        return;
-    }
-    recent.set_visible(true);
-    recent.append(&widgets::label("RECENT", "group-title"));
-    let list = widgets::vbox(0);
-    list.add_css_class("group-list");
-    for c in chats {
-        let b = gtk::Button::new();
-        b.add_css_class("flat");
-        b.add_css_class("recent-row");
-        let row = widgets::hbox(12);
-        let t = widgets::short_label(&c.title, "", pango::EllipsizeMode::End);
-        t.set_hexpand(true);
-        row.append(&t);
-        row.append(&widgets::label(&util::ago(c.updated), "dim"));
-        b.set_child(Some(&row));
-        let id = c.id;
-        b.connect_clicked(move |_| super::open(id));
-        list.append(&b);
-    }
-    recent.append(&list);
-}
-
 /// Rebuild the conversation from the store.
 pub(super) fn render(p: &Rc<Page>) {
     widgets::clear(&p.column);
@@ -114,10 +28,10 @@ pub(super) fn render(p: &Rc<Page>) {
     let streaming_ids: Vec<i64> = streams.iter().flat_map(|s| s.ids()).collect();
     let path = store::path_to(&all, leaf);
     let empty = path.is_empty() && streams.is_empty();
-    p.empty.set_visible(empty);
+    super::set_home(p, empty);
     p.column.set_visible(!empty);
     if empty {
-        fill_empty(p);
+        super::home::fill(p);
         return;
     }
 
@@ -391,6 +305,79 @@ fn branch_nav(sibs: &[i64], current: i64, all: &[Message]) -> gtk::Widget {
     bx.upcast()
 }
 
+/// A reply's action with its name beside the icon.
+fn text_button(icon: &str, text: &str, tip: &str, f: impl Fn(&gtk::Button) + 'static) -> gtk::Button {
+    let b = widgets::icon_label_button(icon, text);
+    b.add_css_class("flat");
+    b.add_css_class("reply-action");
+    b.set_tooltip_text(Some(tip));
+    b.connect_clicked(f);
+    b
+}
+
+type MenuItem<'a> = (&'a str, Box<dyn Fn()>);
+type OwnedItem = (String, Box<dyn Fn()>);
+
+/// ⋯ with a reply's other actions. `narrow_extra` is listed too while the window is
+/// narrow, where its own button is hidden.
+fn more_menu(items: Vec<MenuItem<'_>>, narrow_extra: MenuItem<'_>) -> gtk::MenuButton {
+    let m = gtk::MenuButton::new();
+    m.set_icon_name("view-more-symbolic");
+    m.add_css_class("flat");
+    m.add_css_class("reply-more");
+    m.set_tooltip_text(Some("Edit, continue, branch, delete"));
+    let items: Rc<Vec<OwnedItem>> = Rc::new(items.into_iter().map(|(t, f)| (t.to_string(), f)).collect());
+    let extra: Rc<OwnedItem> = Rc::new((narrow_extra.0.to_string(), narrow_extra.1));
+    m.set_create_popup_func(move |m| {
+        let pop = gtk::Popover::new();
+        pop.add_css_class("menu");
+        let v = widgets::vbox(1);
+        let mut rows: Vec<usize> = (0..items.len()).collect();
+        if window::narrow() {
+            rows.insert(0, usize::MAX);
+        }
+        for i in rows {
+            let label = if i == usize::MAX { extra.0.clone() } else { items[i].0.clone() };
+            let b = gtk::Button::with_label(&label);
+            b.add_css_class("flat");
+            b.add_css_class("menu-row");
+            if let Some(l) = b.child().and_downcast::<gtk::Label>() {
+                l.set_xalign(0.0);
+            }
+            let (items, extra, pop2) = (items.clone(), extra.clone(), pop.clone());
+            b.connect_clicked(move |_| {
+                pop2.popdown();
+                if i == usize::MAX { (extra.1)() } else { (items[i].1)() }
+            });
+            v.append(&b);
+        }
+        pop.set_child(Some(&v));
+        m.set_popover(Some(&pop));
+    });
+    m
+}
+
+/// A reply's speed in words: "41 words/s · 2.1 s to start".
+fn speed_text(chain: &[Message], first: &Message, last: &Message, tokens: i64) -> String {
+    let words: usize = chain.iter().filter(|m| m.role == "assistant").map(|m| m.content.split_whitespace().count()).sum();
+    let start = Stats::from_json(&first.extra["stats"], first.tokens, first.tps).first_token_ms();
+    let mut parts = Vec::new();
+    if last.tps > 0.0 && last.tokens > 0 {
+        let last_words = last.content.split_whitespace().count() as f64;
+        let wps = last_words * last.tps / last.tokens as f64;
+        if wps >= 1.0 {
+            parts.push(format!("{wps:.0} words/s"));
+        }
+    }
+    if parts.is_empty() {
+        parts.push(if words > 0 { format!("{words} words") } else { format!("{tokens} tokens") });
+    }
+    if start > 0 {
+        parts.push(format!("{:.1} s to start", start as f64 / 1000.0));
+    }
+    parts.join(" · ")
+}
+
 pub(super) fn icon_button(icon: &str, tip: &str, f: impl Fn(&gtk::Button) + 'static) -> gtk::Button {
     let b = gtk::Button::from_icon_name(icon);
     b.add_css_class("flat");
@@ -434,7 +421,10 @@ fn stats_button(text: &str, first: &Message, last: &Message, tokens: i64) -> gtk
     let b = gtk::MenuButton::new();
     b.add_css_class("flat");
     b.add_css_class("msg-stats");
-    b.set_label(text);
+    let row = widgets::hbox(5);
+    row.append(&gtk::Image::from_icon_name("chat-zap-symbolic"));
+    row.append(&widgets::label(text, "tnum"));
+    b.set_child(Some(&row));
     b.set_tooltip_text(Some("Details"));
     let first_stats = Stats::from_json(&first.extra["stats"], first.tokens, first.tps);
     let last_stats = Stats::from_json(&last.extra["stats"], last.tokens, last.tps);
@@ -507,15 +497,17 @@ fn answer(p: &Rc<Page>, chain: &[Message], all: &[Message], json_mode: bool, com
 
     let head = widgets::hbox(8);
     head.add_css_class("msg-head");
-    let model = widgets::short_label(&first.model, "model-name", pango::EllipsizeMode::End);
-    model.set_ellipsize(pango::EllipsizeMode::End);
+    let spark = gtk::Image::from_icon_name("chat-spark-symbolic");
+    spark.add_css_class("spark");
+    head.append(&spark);
+    let model = widgets::short_label(&util::model_label(&first.model), "model-name", pango::EllipsizeMode::End);
+    model.set_tooltip_text(Some(&first.model));
     head.append(&model);
+    if let Some(t) = chrono::DateTime::from_timestamp(first.created, 0) {
+        head.append(&widgets::label(&t.with_timezone(&chrono::Local).format("%H:%M").to_string(), "msg-time"));
+    }
     let last = chain.iter().rev().find(|m| m.role == "assistant").unwrap_or(first);
     let tokens: i64 = chain.iter().map(|m| m.tokens).sum();
-    if tokens > 0 {
-        let text = if last.tps > 0.0 { format!("{tokens} tok · {:.1} tok/s", last.tps) } else { format!("{tokens} tok") };
-        head.append(&stats_button(&text, first, last, tokens));
-    }
     if chain.iter().any(|m| m.extra["edited"].as_bool() == Some(true)) {
         let t = widgets::tag("Edited", "");
         t.set_tooltip_text(Some("You changed this reply"));
@@ -604,20 +596,27 @@ fn answer(p: &Rc<Page>, chain: &[Message], all: &[Message], json_mode: bool, com
         .collect::<Vec<_>>()
         .join("\n\n");
     let t2 = text.clone();
-    actions.append(&icon_button("edit-copy-symbolic", "Copy", move |b| {
+    actions.append(&text_button("edit-copy-symbolic", "Copy", "Copy the reply", move |b| {
         b.clipboard().set_text(&t2);
         window::toast("Copied");
     }));
     let (p2, parent, model_name) = (p.clone(), first.parent, first.model.clone());
-    actions.append(&icon_button("view-refresh-symbolic", "Regenerate", move |_| {
+    actions.append(&text_button("view-refresh-symbolic", "Regenerate", "Write this reply again", move |_| {
         if let Some(u) = parent {
             send::generate(&p2, u, vec![model_name.clone()]);
         }
     }));
+    let t3 = text.clone();
+    let read = text_button("audio-speakers-symbolic", "Read aloud", "Read the reply aloud", move |_| crate::voice::speak(&t3));
+    read.add_css_class("wide-only");
+    read.set_visible(!window::narrow());
+    actions.append(&read);
     // The reply's last written message: what Edit changes and Continue extends.
     let tail = chain.iter().rev().find(|m| m.role == "assistant" && !m.content.is_empty() && m.tool_calls.is_empty()).cloned();
     let last_id = chain.last().map(|l| l.id);
     let is_tip = !all.iter().any(|x| x.parent.is_some() && x.parent == last_id);
+    // Edit, continue, branch and delete, behind ⋯.
+    let mut more: Vec<MenuItem<'_>> = Vec::new();
     if let Some(tail) = tail.clone()
         && is_tip
         && compare.is_none()
@@ -631,24 +630,21 @@ fn answer(p: &Rc<Page>, chain: &[Message], all: &[Message], json_mode: bool, com
             b.connect_clicked(move |_| send::continue_reply(&p2, id));
             actions.append(&b);
         } else {
-            actions.append(&icon_button("media-seek-forward-symbolic", "Continue writing", move |_| send::continue_reply(&p2, id)));
+            more.push(("Continue writing", Box::new(move || send::continue_reply(&p2, id))));
         }
     }
     if let Some(tail) = tail {
         let (p2, body2) = (p.clone(), body.clone());
-        actions.append(&icon_button("document-edit-symbolic", "Edit this reply", move |_| edit_reply(&p2, &tail, &body2)));
+        more.push(("Edit this reply", Box::new(move || edit_reply(&p2, &tail, &body2))));
     }
     if let Some(end) = chain.last() {
         let (p2, id) = (p.clone(), end.id);
-        actions.append(&icon_button("chat-branch-symbolic", "Branch into a new chat from here", move |_| {
-            send::branch(&p2, id)
-        }));
+        more.push(("Branch into a new chat from here", Box::new(move || send::branch(&p2, id))));
     }
-    let t3 = text.clone();
-    actions.append(&icon_button("audio-speakers-symbolic", "Read aloud", move |_| crate::voice::speak(&t3)));
     let (p2, first_id) = (p.clone(), first.id);
-    let del = icon_button("user-trash-symbolic", "Delete this answer", move |_| send::delete_answer(&p2, first_id));
-    actions.append(&del);
+    more.push(("Delete this answer", Box::new(move || send::delete_answer(&p2, first_id))));
+    let t4 = text.clone();
+    actions.append(&more_menu(more, ("Read aloud", Box::new(move || crate::voice::speak(&t4)))));
     if compare == Some(false) {
         let (p2, id) = (p.clone(), first.id);
         let use_it = gtk::Button::with_label("Continue with this");
@@ -663,6 +659,12 @@ fn answer(p: &Rc<Page>, chain: &[Message], all: &[Message], json_mode: bool, com
             render(&p2);
         });
         actions.append(&use_it);
+    }
+    if tokens > 0 {
+        let spacer = widgets::hbox(0);
+        spacer.set_hexpand(true);
+        actions.append(&spacer);
+        actions.append(&stats_button(&speed_text(chain, first, last, tokens), first, last, tokens));
     }
     root.append(&actions);
     if is_tip && compare.is_none() {

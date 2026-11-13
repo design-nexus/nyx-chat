@@ -1,4 +1,4 @@
-//! The chat list in the sidebar: folders, pinned chats and chats by date, or
+//! The chat list on the Chats page: pinned chats, folders and chats by date, or
 //! search results while the search field has text.
 
 use gtk::prelude::*;
@@ -43,24 +43,12 @@ fn delete_with_undo(id: i64) {
     });
 }
 
-/// The list, driven by `search`. Every instance (sidebar, history popover)
-/// rebuilds itself when chats change. `scroll` wraps it in its own scroller
-/// (the popover); the sidebar scrolls it with the pages.
-pub fn build(search: &gtk::SearchEntry, scroll: bool) -> gtk::Widget {
+/// The list, driven by `search`. It rebuilds itself when chats change.
+pub fn build(search: &gtk::SearchEntry) -> gtk::Widget {
     let outer = widgets::vbox(0);
     let list = widgets::vbox(1);
     list.add_css_class("chat-list");
-    if scroll {
-        let sw = gtk::ScrolledWindow::builder()
-            .hscrollbar_policy(gtk::PolicyType::Never)
-            .vscrollbar_policy(gtk::PolicyType::External)
-            .vexpand(true)
-            .child(&list)
-            .build();
-        outer.append(&sw);
-    } else {
-        outer.append(&list);
-    }
+    outer.append(&list);
 
     let query = Rc::new(RefCell::new(String::new()));
     let rebuild = {
@@ -253,7 +241,13 @@ fn chat_row(c: &Chat) -> gtk::Widget {
     let t = widgets::label(&c.title, "chat-title");
     t.set_ellipsize(pango::EllipsizeMode::End);
     t.set_hexpand(true);
+    t.set_xalign(0.0);
     content.append(&t);
+    let meta = if c.model.is_empty() { util::ago(c.updated) } else { format!("{} · {}", util::model_label(&c.model), util::ago(c.updated)) };
+    let m = widgets::label(&meta, "chat-meta");
+    m.set_ellipsize(pango::EllipsizeMode::Middle);
+    m.set_max_width_chars(36);
+    content.append(&m);
     b.set_child(Some(&content));
     b.set_tooltip_text(Some(&format!("{} · {}", c.title, util::ago(c.updated))));
     let id = c.id;

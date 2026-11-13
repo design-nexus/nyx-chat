@@ -809,6 +809,14 @@ pub fn votes() -> Result<Vec<(String, String, String)>> {
     })
 }
 
+/// The newest rounds first: (question, model A, model B, winner).
+pub fn recent_votes(n: usize) -> Result<Vec<(String, String, String, String)>> {
+    with(|db| {
+        let mut st = db.prepare("SELECT prompt, model_a, model_b, winner FROM arena ORDER BY id DESC LIMIT ?1")?;
+        Ok(st.query_map([n as i64], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?.collect::<rusqlite::Result<_>>()?)
+    })
+}
+
 pub fn clear_votes() -> Result<()> {
     with(|db| {
         db.execute("DELETE FROM arena", [])?;
@@ -863,6 +871,58 @@ pub fn daily(days: i64) -> Result<Vec<(i64, i64, i64)>> {
             out.push((a, tokens, chats));
         }
         Ok(out)
+    })
+}
+
+/// The last seven days: chats started and words the models wrote.
+pub struct Week {
+    pub chats: i64,
+    pub words: u64,
+}
+
+pub fn week() -> Result<Week> {
+    let since = util::now() - 7 * 86_400;
+    with(|db| {
+        let chats = db.query_row("SELECT COUNT(*) FROM chats WHERE created >= ?1 AND temporary = 0", [since], |r| r.get(0))?;
+        let mut st = db.prepare("SELECT content FROM messages WHERE role = 'assistant' AND created >= ?1")?;
+        let mut words = 0u64;
+        for content in st.query_map([since], |r| r.get::<_, String>(0))? {
+            words += content?.split_whitespace().count() as u64;
+        }
+        Ok(Week { chats, words })
+    })
+}
+
+/// The model that writes fastest, in words a second: its average speed in tokens,
+/// turned into words by how many words its recent replies have per token.
+pub fn fastest() -> Result<Option<(String, f64)>> {
+    let best = per_model()?.into_iter().filter(|m| m.avg_tps > 0.0).max_by(|a, b| a.avg_tps.total_cmp(&b.avg_tps));
+    let Some(best) = best else { return Ok(None) };
+    with(|db| {
+        let mut st = db.prepare(
+            "SELECT content, tokens FROM messages WHERE role = 'assistant' AND model = ?1 AND tokens > 0 ORDER BY id DESC LIMIT 200",
+        )?;
+        let (mut words, mut tokens) = (0u64, 0i64);
+        for row in st.query_map([&best.model], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))? {
+            let (content, t) = row?;
+            words += content.split_whitespace().count() as u64;
+            tokens += t;
+        }
+        let ratio = if tokens > 0 { words as f64 / tokens as f64 } else { 0.0 };
+        Ok((ratio > 0.0).then(|| (best.model.clone(), best.avg_tps * ratio)))
+    })
+}
+
+/// The newest reply in a chat, for a preview line.
+pub fn last_reply(chat: i64) -> Result<Option<String>> {
+    with(|db| {
+        Ok(db
+            .query_row(
+                "SELECT content FROM messages WHERE chat = ?1 AND role = 'assistant' AND content != '' ORDER BY id DESC LIMIT 1",
+                [chat],
+                |r| r.get(0),
+            )
+            .optional()?)
     })
 }
 

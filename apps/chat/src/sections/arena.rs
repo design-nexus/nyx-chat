@@ -62,28 +62,90 @@ struct Round {
     voted: Cell<bool>,
 }
 
-pub fn build() -> gtk::Widget {
-    let page = widgets::page("arena");
+/// The leaderboard and the last rounds, redrawn after every vote.
+struct Boards {
+    board_count: gtk::Label,
+    board: gtk::Box,
+    rounds_head: gtk::Label,
+    rounds: gtk::Box,
+}
 
-    let g = page.group("New round");
-    let pickers = widgets::hbox(10);
+impl Boards {
+    fn fill(&self) {
+        draw_board(&self.board, &self.board_count);
+        draw_rounds(&self.rounds, &self.rounds_head);
+    }
+}
+
+pub fn build() -> gtk::Widget {
+    let root = widgets::vbox(0);
+    root.add_css_class("arena-page");
+    let (bar, _, end) = widgets::page_bar("Arena", "Two hidden models answer; you pick the better one");
+    let new_round = widgets::icon_label_button("view-refresh-symbolic", "New round");
+    new_round.set_tooltip_text(Some("Ask a new question"));
+    end.append(&new_round);
+    root.append(&bar);
+
+    let cols = widgets::hbox(0);
+    cols.set_vexpand(true);
+    root.append(&cols);
+    let body = widgets::vbox(14);
+    body.add_css_class("arena-body");
+    let scroll = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vscrollbar_policy(gtk::PolicyType::External)
+        .hexpand(true)
+        .child(&body)
+        .build();
+    cols.append(&scroll);
+    let line = nyx_ui::frame::pane_line(gtk::Orientation::Vertical);
+    cols.append(&line);
+    let side = widgets::vbox(0);
+    side.add_css_class("arena-side");
+    cols.append(&side);
+
+    // ----- A new round: the question and, if wanted, the two models -----
+    let ask = widgets::vbox(10);
+    ask.add_css_class("arena-ask");
+    let (sw, prompt) = widgets::text_area("", false, 64);
+    let prompt_buf = prompt.buffer();
+    let ph = widgets::label("Ask both models the same question…", "arena-placeholder");
+    ph.set_can_target(false);
+    ph.set_halign(gtk::Align::Start);
+    ph.set_valign(gtk::Align::Start);
+    let tover = gtk::Overlay::new();
+    tover.set_child(Some(&sw));
+    tover.add_overlay(&ph);
+    let ph2 = ph.clone();
+    prompt_buf.connect_changed(move |b| ph2.set_visible(b.char_count() == 0));
+    ask.append(&tover);
+    let pickers = widgets::hbox(8);
+    pickers.add_css_class("arena-pickers");
     let pick_a = gtk::DropDown::from_strings(&[]);
     let pick_b = gtk::DropDown::from_strings(&[]);
-    widgets::ellipsize(&pick_a);
-    widgets::ellipsize(&pick_b);
+    widgets::ellipsize_to(&pick_a, 18);
+    widgets::ellipsize_to(&pick_b, 18);
     for (label, dd) in [("Model A", &pick_a), ("Model B", &pick_b)] {
-        let v = widgets::vbox(4);
-        v.set_hexpand(true);
-        v.append(&widgets::label(label, "field-label"));
-        v.append(dd);
-        pickers.append(&v);
+        pickers.append(&widgets::label(label, "field-label"));
+        pickers.append(dd);
     }
+    let spacer = widgets::hbox(0);
+    spacer.set_hexpand(true);
+    pickers.append(&spacer);
+    let start = gtk::Button::with_label("Start round");
+    start.add_css_class("suggested-action");
+    pickers.append(&start);
+    ask.append(&pickers);
+    let note = widgets::label("Leave both on Random to keep it blind. Names show after you vote.", "arena-note");
+    note.set_xalign(0.0);
+    note.set_wrap(true);
+    ask.append(&note);
+    body.append(&ask);
     let fill = {
         let (a, b) = (pick_a.clone(), pick_b.clone());
         move || {
             let mut names = vec![RANDOM.to_string()];
             names.extend(models::chat_models());
-            // Short names: two pickers sit side by side.
             let labels: Vec<String> = names
                 .iter()
                 .map(|m| if m == RANDOM { m.clone() } else { util::clip_middle(&util::model_label(m), 26) })
@@ -95,45 +157,102 @@ pub fn build() -> gtk::Widget {
     };
     fill();
     hub::on(&hub::MODELS, &pickers, fill);
-    g.add(&pickers);
-    let note = widgets::label("Leave both on Random to keep it blind. Names are shown after you vote.", "dim");
-    note.add_css_class("small-text");
-    note.set_wrap(true);
-    g.add(&note);
-    let (sw, prompt) = widgets::text_area("", false, 80);
-    let prompt_buf = prompt.buffer();
-    g.add(&sw);
-    let start = gtk::Button::with_label("Start round");
-    start.add_css_class("suggested-action");
-    start.set_halign(gtk::Align::End);
-    g.add(&start);
 
-    let arena = widgets::hbox(14);
+    // ----- The round: the question, two hidden answers, the vote -----
+    let question = widgets::hbox(10);
+    question.add_css_class("arena-question");
+    question.append(&gtk::Image::from_icon_name("chat-message-new-symbolic"));
+    let question_text = widgets::label("", "");
+    question_text.set_wrap(true);
+    question_text.set_xalign(0.0);
+    question_text.set_selectable(true);
+    question.append(&question_text);
+    question.set_visible(false);
+    body.append(&question);
+    let arena = widgets::hbox(12);
     arena.set_homogeneous(true);
     arena.add_css_class("arena-row");
-    page.body.append(&arena);
+    arena.set_visible(false);
+    body.append(&arena);
     let votes = widgets::hbox(8);
     votes.set_halign(gtk::Align::Center);
     votes.add_css_class("arena-votes");
     votes.set_visible(false);
-    page.body.append(&votes);
+    body.append(&votes);
+
+    let rounds_head = widgets::label("Your last rounds", "arena-sechead");
+    rounds_head.set_xalign(0.0);
+    body.append(&rounds_head);
+    let rounds = widgets::vbox(0);
+    rounds.add_css_class("arena-rounds");
+    body.append(&rounds);
+
+    // ----- The leaderboard, beside the round (under it in narrow windows) -----
+    let board_box = widgets::vbox(0);
+    board_box.add_css_class("arena-board");
+    let head = widgets::hbox(8);
+    head.add_css_class("arena-board-head");
+    head.append(&widgets::label("Leaderboard", "arena-board-title"));
+    let board_count = widgets::label("", "arena-board-count");
+    board_count.set_hexpand(true);
+    board_count.set_xalign(0.0);
+    head.append(&board_count);
+    board_box.append(&head);
+    let board = widgets::vbox(0);
+    board_box.append(&board);
+    let boards = Rc::new(Boards { board_count, board, rounds_head, rounds });
+    let b2 = boards.clone();
+    let clear = widgets::two_click("Reset leaderboard", "Click again to clear every vote", move || {
+        let _ = store::clear_votes();
+        b2.fill();
+    });
+    clear.remove_css_class("destructive-action");
+    clear.add_css_class("flat");
+    clear.add_css_class("danger-text");
+    clear.add_css_class("arena-reset");
+    clear.set_halign(gtk::Align::Start);
+    board_box.append(&clear);
+    side.append(&board_box);
+    boards.fill();
     crate::window::on_narrow({
         let arena = arena.clone();
         move |n| arena.set_orientation(if n { gtk::Orientation::Vertical } else { gtk::Orientation::Horizontal })
     });
-
-    let board = page.group("Leaderboard");
-    let board_list = widgets::vbox(6);
-    board.add(&board_list);
-    let fill_board = {
-        let bl = board_list.clone();
-        Rc::new(move || draw_board(&bl))
-    };
-    fill_board();
+    // The leaderboard needs 280 px beside the round; under 1200 px it goes under it.
+    crate::window::on_roomy({
+        let (side, line, body, board_box) = (side.clone(), line.clone(), body.clone(), board_box.clone());
+        move |roomy| {
+            let n = !roomy;
+            let target = if n { &body } else { &side };
+            if board_box.parent().as_ref() != Some(target.upcast_ref::<gtk::Widget>()) {
+                if let Some(p) = board_box.parent().and_downcast::<gtk::Box>() {
+                    p.remove(&board_box);
+                }
+                target.append(&board_box);
+            }
+            side.set_visible(!n);
+            line.set_visible(!n);
+        }
+    });
 
     let round: Rc<RefCell<Option<Rc<Round>>>> = Rc::new(RefCell::new(None));
-    let (pa, pb, arena2, votes2, round2, fb) =
-        (pick_a.clone(), pick_b.clone(), arena.clone(), votes.clone(), round.clone(), fill_board.clone());
+    {
+        let (ask, question, arena, votes, prompt, round) =
+            (ask.clone(), question.clone(), arena.clone(), votes.clone(), prompt.clone(), round.clone());
+        new_round.connect_clicked(move |_| {
+            *round.borrow_mut() = None;
+            widgets::clear(&arena);
+            widgets::clear(&votes);
+            for w in [question.upcast_ref::<gtk::Widget>(), arena.upcast_ref(), votes.upcast_ref()] {
+                w.set_visible(false);
+            }
+            prompt.buffer().set_text("");
+            ask.set_visible(true);
+            prompt.grab_focus();
+        });
+    }
+    let (pa, pb, arena2, votes2, round2, fb) = (pick_a.clone(), pick_b.clone(), arena.clone(), votes.clone(), round.clone(), boards.clone());
+    let (ask2, question2, question_text2) = (ask.clone(), question.clone(), question_text.clone());
     start.connect_clicked(move |_| {
         let text = widgets::buffer_text(&prompt).trim().to_string();
         if text.is_empty() {
@@ -169,12 +288,19 @@ pub fn build() -> gtk::Widget {
         widgets::clear(&arena2);
         widgets::clear(&votes2);
         votes2.set_visible(false);
+        ask2.set_visible(false);
+        question_text2.set_text(&text);
+        question2.set_visible(true);
+        arena2.set_visible(true);
         let cols = [("Model A", a), ("Model B", b)].map(|(label, model)| {
-            let col = widgets::vbox(8);
-            col.add_css_class("assistant-msg");
+            let col = widgets::vbox(10);
             col.add_css_class("arena-answer");
-            let name = widgets::short_label(label, "model-name", gtk::pango::EllipsizeMode::End);
-            col.append(&name);
+            let head = widgets::hbox(8);
+            head.append(&widgets::label(label, "arena-answer-name"));
+            let name = widgets::short_label("hidden until you vote", "arena-answer-model", gtk::pango::EllipsizeMode::End);
+            name.set_tooltip_text(None);
+            head.append(&name);
+            col.append(&head);
             let md = Markdown::new();
             col.append(&md.root);
             arena2.append(&col);
@@ -210,14 +336,7 @@ pub fn build() -> gtk::Widget {
             s2.emit_clicked();
         });
     }
-    let fb = fill_board.clone();
-    let clear = widgets::two_click("Reset leaderboard", "Click again to clear every vote", move || {
-        let _ = store::clear_votes();
-        fb();
-    });
-    clear.set_halign(gtk::Align::Start);
-    board.add(&clear);
-    page.root.upcast()
+    root.upcast()
 }
 
 fn run_one(model: &str, prompt: &str, md: Rc<Markdown>, done: impl Fn() + 'static) {
@@ -255,57 +374,119 @@ fn run_one(model: &str, prompt: &str, md: Rc<Markdown>, done: impl Fn() + 'stati
     );
 }
 
-fn show_votes(votes: &gtk::Box, r: &Rc<Round>, labels: &[gtk::Label], board: Rc<dyn Fn()>) {
+fn show_votes(votes: &gtk::Box, r: &Rc<Round>, labels: &[gtk::Label], boards: Rc<Boards>) {
     votes.set_visible(true);
-    for (id, text) in [("a", "A is better"), ("tie", "It's a tie"), ("b", "B is better"), ("bad", "Both are bad")] {
-        let b = gtk::Button::with_label(text);
-        if id == "a" || id == "b" {
-            b.add_css_class("suggested-action");
+    let choices = [
+        ("a", "A is better", Some("go-previous-symbolic")),
+        ("tie", "It's a tie", None),
+        ("bad", "Both are bad", None),
+        ("b", "B is better", Some("go-next-symbolic")),
+    ];
+    for (id, text, icon) in choices {
+        let b = match icon {
+            Some(i) => widgets::icon_label_button(i, text),
+            None => gtk::Button::with_label(text),
+        };
+        b.add_css_class("arena-vote");
+        if id == "bad" {
+            b.add_css_class("danger-text");
         }
-        let (r2, labels2, votes2, board2) = (r.clone(), labels.to_vec(), votes.clone(), board.clone());
+        let (r2, labels2, votes2, boards2) = (r.clone(), labels.to_vec(), votes.clone(), boards.clone());
         b.connect_clicked(move |_| {
             if r2.voted.replace(true) {
                 return;
             }
             let _ = store::add_vote(&r2.prompt, &r2.a, &r2.b, id);
-            for (l, (side, m)) in labels2.iter().zip([("A", &r2.a), ("B", &r2.b)]) {
-                l.set_text(&format!("{side} · {}", util::model_label(m)));
+            for (l, m) in labels2.iter().zip([&r2.a, &r2.b]) {
+                l.set_text(&util::model_label(m));
                 l.set_tooltip_text(Some(m));
+                l.add_css_class("revealed");
             }
             widgets::clear(&votes2);
             votes2.append(&widgets::label("Thanks. The leaderboard is updated.", "dim"));
-            board2();
+            boards2.fill();
         });
         votes.append(&b);
     }
 }
 
-fn draw_board(b: &gtk::Box) {
+fn plural(n: usize, one: &str) -> String {
+    format!("{n} {one}{}", if n == 1 { "" } else { "s" })
+}
+
+fn draw_board(b: &gtk::Box, count: &gtk::Label) {
     widgets::clear(b);
     let votes = store::votes().unwrap_or_default();
+    count.set_text(&if votes.is_empty() { String::new() } else { plural(votes.len(), "vote") });
     if votes.is_empty() {
-        b.append(&widgets::empty("No votes yet. Play a round above."));
+        let e = widgets::empty("No votes yet. Play a round to start the board.");
+        e.add_css_class("arena-board-empty");
+        b.append(&e);
         return;
     }
     for (i, (model, rating, w, l, t)) in elo(&votes).into_iter().enumerate() {
-        let row = widgets::hbox(12);
-        row.add_css_class("settings-option");
+        let row = widgets::hbox(10);
+        row.add_css_class("board-row");
         let rank = widgets::label(&format!("{}", i + 1), "board-rank");
         rank.add_css_class("tnum");
-        rank.set_width_chars(3);
+        if i == 0 {
+            rank.add_css_class("first");
+        }
+        rank.set_valign(gtk::Align::Center);
         row.append(&rank);
-        let name = widgets::label(&model, "settings-option-title");
-        name.set_hexpand(true);
+        let tx = widgets::vbox(1);
+        tx.set_hexpand(true);
+        let name = widgets::label(&util::model_label(&model), "board-model");
+        name.set_xalign(0.0);
         name.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
-        row.append(&name);
-        let rec = widgets::label(&format!("{w}–{l}–{t}"), "dim");
+        name.set_tooltip_text(Some(&model));
+        tx.append(&name);
+        let rec = widgets::label(&format!("{w}–{l}–{t} wins, losses, ties"), "board-record");
+        rec.set_xalign(0.0);
         rec.add_css_class("tnum");
-        rec.set_tooltip_text(Some("Wins, losses, ties"));
-        row.append(&rec);
-        let r = widgets::label(&format!("{rating:.0}"), "value-readout");
+        tx.append(&rec);
+        row.append(&tx);
+        let r = widgets::label(&format!("{rating:.0}"), "board-score");
         r.add_css_class("tnum");
-        r.set_xalign(1.0);
+        r.set_tooltip_text(Some("Rating: everyone starts at 1000"));
+        r.set_valign(gtk::Align::Center);
         row.append(&r);
+        b.append(&row);
+    }
+}
+
+/// The newest rounds: the question and who won.
+fn draw_rounds(b: &gtk::Box, head: &gtk::Label) {
+    widgets::clear(b);
+    let rounds = store::recent_votes(5).unwrap_or_default();
+    head.set_visible(!rounds.is_empty());
+    b.set_visible(!rounds.is_empty());
+    for (prompt, a, m_b, winner) in rounds {
+        let row = widgets::hbox(10);
+        row.add_css_class("round-row");
+        let decided = matches!(winner.as_str(), "a" | "b");
+        let icon = gtk::Image::from_icon_name(if decided { "object-select-symbolic" } else { "view-dual-symbolic" });
+        icon.add_css_class(if decided { "round-won" } else { "round-even" });
+        row.append(&icon);
+        let q = widgets::label(prompt.lines().next().unwrap_or(""), "round-question");
+        q.set_hexpand(true);
+        q.set_xalign(0.0);
+        q.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        q.set_tooltip_text(Some(&prompt));
+        row.append(&q);
+        let (win, lose) = if winner == "b" { (&m_b, &a) } else { (&a, &m_b) };
+        let short = |m: &str| util::esc(&util::clip_middle(&util::model_label(m), 22));
+        let result = gtk::Label::new(None);
+        result.add_css_class("round-result");
+        match winner.as_str() {
+            "a" | "b" => result.set_markup(&format!("<b>{}</b> beat {}", short(win), short(lose))),
+            "bad" => result.set_text("Both were bad"),
+            _ => result.set_text("It's a tie"),
+        }
+        result.set_tooltip_text(Some(&format!("{} and {}", a, m_b)));
+        result.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        result.set_max_width_chars(48);
+        row.append(&result);
         b.append(&row);
     }
 }

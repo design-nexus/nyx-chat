@@ -36,7 +36,11 @@ impl Live {
         root.set_hexpand(true);
         let head = widgets::hbox(8);
         head.add_css_class("msg-head");
-        let name = widgets::short_label(model, "model-name", gtk::pango::EllipsizeMode::End);
+        let spark = gtk::Image::from_icon_name("chat-spark-symbolic");
+        spark.add_css_class("spark");
+        head.append(&spark);
+        let name = widgets::short_label(&crate::util::model_label(model), "model-name", gtk::pango::EllipsizeMode::End);
+        name.set_tooltip_text(Some(model));
         name.set_hexpand(true);
         head.append(&name);
         let spinner = gtk::Spinner::new();

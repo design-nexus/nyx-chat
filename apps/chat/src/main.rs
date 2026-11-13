@@ -38,7 +38,7 @@ const APP_ID: &str = "io.github.design_nexus.nyx.Chat";
 
 const USAGE: &str = "Usage: nyx-chat [OPTION…]\n\
 \n\
-  --section ID     open a page: chat, models, marketplace, arena, knowledge, prompts, stats, settings\n\
+  --section ID     open a page: home, chats, chat, models, marketplace, knowledge, prompts, arena, stats, settings\n\
   --new            start a new chat\n\
   --quick          open the small Quick ask window\n\
   --selection      with --quick: ask about the highlighted text\n\
