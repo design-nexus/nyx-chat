@@ -91,6 +91,9 @@ pub struct Prefs {
     pub new_chat_model: String,
     /// The model last picked in a chat.
     pub last_model: String,
+    /// Nyx AI Core's default chat model as Chat last saw it: when Settings changes
+    /// it, new chats follow the change as if it was picked here.
+    pub ai_default_seen: String,
     /// Keep the last picked model in memory until another is picked.
     pub keep_loaded: bool,
     pub system_prompt: String,
@@ -179,6 +182,7 @@ impl Default for Prefs {
             backend_migrated: true,
             new_chat_model: String::new(),
             last_model: String::new(),
+            ai_default_seen: String::new(),
             keep_loaded: true,
             system_prompt: String::new(),
             user_name: String::new(),

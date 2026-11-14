@@ -110,6 +110,12 @@ pub fn init() {
         }
         glib::ControlFlow::Continue
     });
+    glib::timeout_add_seconds_local(5, || {
+        if models::online() == Some(true) {
+            models::check_shared_default();
+        }
+        glib::ControlFlow::Continue
+    });
     glib::timeout_add_seconds_local_once(8, models::daily_update_check);
 }
 

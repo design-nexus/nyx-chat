@@ -186,6 +186,23 @@ pub async fn default_chat_model() -> Result<Option<String>> {
     Ok(client().service_settings().await.map_err(fail)?.defaults.get("chat").cloned())
 }
 
+/// Make `model` the default for new chats, so Settings and other apps that chat
+/// show and use what was last picked in Chat.
+pub async fn set_default_chat_model(model: &str) -> Result<()> {
+    let defaults = BTreeMap::from([("chat".to_string(), model.to_string())]);
+    client()
+        .configure_service_with(proto::Op::ConfigureService {
+            max_loaded: None,
+            idle_unload_seconds: None,
+            model_updates: None,
+            defaults: Some(defaults),
+            battery_saver: None,
+        })
+        .await
+        .map_err(fail)?;
+    Ok(())
+}
+
 /// Models AI Core already knows have updates (it checks daily).
 pub async fn known_updates() -> Result<Vec<String>> {
     Ok(client().list_models().await.map_err(fail)?.into_iter().filter(|m| m.update_available).map(|m| m.id).collect())

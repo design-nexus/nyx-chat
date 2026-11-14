@@ -158,7 +158,19 @@ pub fn pick(name: &str) {
     if prev == name {
         return;
     }
-    prefs::update(|p| p.last_model = name.to_string());
+    prefs::update(|p| {
+        p.last_model = name.to_string();
+        p.ai_default_seen = name.to_string();
+    });
+    let conn = Conn::current();
+    if crate::llama::core::local(&conn) {
+        let n = name.to_string();
+        rt::spawn(async move { crate::llama::core::set_default_chat_model(&n).await }, |r| {
+            if let Err(e) = r {
+                eprintln!("nyx-chat: couldn't set Nyx AI Core's default chat model: {e:#}");
+            }
+        });
+    }
     if prefs::get().keep_loaded {
         // In Nyx AI Core, unloading only drops Chat's pin: the model stays while
         // another app needs it, and AI Core decides what else to evict.
@@ -227,6 +239,36 @@ fn refresh_running_then_emit() {
     });
 }
 
+/// Nyx AI Core's default chat model, as Settings sets it. A change since Chat last
+/// looked counts as picking that model, so new chats start with it.
+fn follow_shared_default(shared: Option<&str>) {
+    let Some(shared) = shared.filter(|m| !m.is_empty()) else { return };
+    let p = prefs::get();
+    if p.ai_default_seen == shared {
+        return;
+    }
+    let first_look = p.ai_default_seen.is_empty();
+    prefs::update(|p| p.ai_default_seen = shared.to_string());
+    if !first_look && p.last_model != shared {
+        pick(shared);
+        hub::emit(&hub::MODELS);
+    }
+}
+
+/// Re-read Nyx AI Core's default chat model alone (cheap), to notice Settings changing it.
+pub fn check_shared_default() {
+    let conn = Conn::current();
+    if !crate::llama::core::local(&conn) {
+        return;
+    }
+    rt::spawn(async { crate::llama::core::default_chat_model().await.ok().flatten() }, |shared| {
+        follow_shared_default(shared.as_deref());
+        if shared.is_some() {
+            STATE.with(|s| s.borrow_mut().shared_default = shared);
+        }
+    });
+}
+
 /// Re-read the model list and each model's capabilities.
 pub fn refresh() {
     if STATE.with(|s| std::mem::replace(&mut s.borrow_mut().refreshing, true)) {
@@ -254,6 +296,7 @@ pub fn refresh() {
             (tags, running, infos, vram, updates, shared_default)
         },
         move |(tags, running, infos, vram, updates, shared_default)| {
+            follow_shared_default(shared_default.as_deref());
             STATE.with(|s| s.borrow_mut().shared_default = shared_default);
             if let Some(vram) = vram.filter(|v| *v > 0 && *v != prefs::get().vram_bytes) {
                 prefs::update(|p| p.vram_bytes = vram);
