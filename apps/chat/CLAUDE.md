@@ -33,7 +33,7 @@
   a reply; the live widget is re-attached when the chat is shown again.
 - Markdown (`markdown.rs`) keeps one widget per top-level block and only rebuilds blocks
   whose source changed, so streaming stays cheap.
-- Don't wake the dGPU: `GSK_RENDERER=ngl` in `main.rs`; `hw.rs` only calls `nvidia-smi`
+- Don't wake the dGPU: `GSK_RENDERER=gl` in `main.rs`; `hw.rs` only calls `nvidia-smi`
   while `runtime_status` isn't `suspended`, and caches VRAM in prefs.
 - Control (`src/control.rs`): `nyx_core::control` on the app's bus name, for Nyx Assistant: `chat.list`, `search`, `read`, `open`, `send` (`sections::chat::send_text`).
 - Local models: every llama.cpp host on this computer (any loopback address and port) is Nyx AI
