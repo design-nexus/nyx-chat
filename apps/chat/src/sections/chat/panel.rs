@@ -266,6 +266,7 @@ pub(super) fn show_artifact(p: &Rc<Page>, lang: &str, code: &str) {
     head.append(&t);
     let close = gtk::Button::from_icon_name("window-close-symbolic");
     close.add_css_class("flat");
+    close.set_tooltip_text(Some("Close the preview"));
     let p2 = p.clone();
     close.connect_clicked(move |_| {
         p2.panel.set_visible(false);

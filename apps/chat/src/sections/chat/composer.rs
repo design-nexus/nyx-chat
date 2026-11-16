@@ -828,6 +828,7 @@ impl Composer {
             let x = gtk::Button::from_icon_name("window-close-symbolic");
             x.add_css_class("flat");
             x.add_css_class("tiny");
+            x.set_tooltip_text(Some(&format!("Remove {}", a.name)));
             let me = Rc::downgrade(self);
             x.connect_clicked(move |_| {
                 if let Some(c) = me.upgrade() {

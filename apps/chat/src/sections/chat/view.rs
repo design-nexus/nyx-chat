@@ -284,6 +284,7 @@ fn branch_nav(sibs: &[i64], current: i64, all: &[Message]) -> gtk::Widget {
     let prev = gtk::Button::from_icon_name("go-previous-symbolic");
     prev.add_css_class("flat");
     prev.add_css_class("tiny");
+    prev.set_tooltip_text(Some("Previous version of this reply"));
     prev.set_sensitive(pos > 0);
     if pos > 0 {
         prev.connect_clicked(go(sibs[pos - 1], all.to_vec()));
@@ -294,6 +295,7 @@ fn branch_nav(sibs: &[i64], current: i64, all: &[Message]) -> gtk::Widget {
     let next = gtk::Button::from_icon_name("go-next-symbolic");
     next.add_css_class("flat");
     next.add_css_class("tiny");
+    next.set_tooltip_text(Some("Next version of this reply"));
     next.set_sensitive(pos + 1 < sibs.len());
     if pos + 1 < sibs.len() {
         next.connect_clicked(go(sibs[pos + 1], all.to_vec()));

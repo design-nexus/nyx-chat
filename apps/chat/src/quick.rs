@@ -104,6 +104,7 @@ pub fn open(app: &gtk::Application, context: Option<String>) {
     row.append(&input);
     let send = gtk::Button::from_icon_name("go-up-symbolic");
     send.add_css_class("suggested-action");
+    send.set_tooltip_text(Some("Send"));
     row.append(&send);
     root.append(&row);
     window.set_child(Some(&root));
