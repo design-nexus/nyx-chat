@@ -1,5 +1,6 @@
-//! Speech: dictation with whisper.cpp and reading aloud with Piper, both
-//! running locally. PipeWire records and plays the audio.
+//! Speech: dictation and reading aloud through Nyx Voice (`nyx-voiced`), NyxOS's local
+//! speech service, when it's there. Without it, whisper.cpp and Piper, if set up in
+//! Settings → Voice, with PipeWire recording and playing the audio.
 
 use anyhow::{Context, Result, bail};
 use std::cell::RefCell;
@@ -8,10 +9,41 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 
 use crate::{cmd, paths, prefs, window};
+use nyx_voice_client::proto::{Mode, Until};
+
+/// A dictation take in progress.
+enum Take {
+    /// pw-record writing a WAV for whisper.cpp.
+    Local(Child, PathBuf),
+    /// Nyx Voice listening until told to stop; its transcript arrives here.
+    Voice(std::sync::mpsc::Receiver<Result<String>>),
+}
+
+/// What's reading aloud.
+#[derive(Clone, Copy, PartialEq)]
+enum Speech {
+    /// Piper and pw-play's process group.
+    Local(u32),
+    /// A Nyx Voice `speak`, by its turn.
+    Voice(u64),
+}
 
 thread_local! {
-    static RECORDER: RefCell<Option<(Child, PathBuf)>> = const { RefCell::new(None) };
-    static SPEAKER: RefCell<Option<u32>> = const { RefCell::new(None) };
+    static RECORDER: RefCell<Option<Take>> = const { RefCell::new(None) };
+    static SPEAKER: RefCell<Option<Speech>> = const { RefCell::new(None) };
+    static TURN: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Nyx Voice, when its daemon is listening on this session.
+fn nyx_voice() -> Option<nyx_voice_client::Client> {
+    let client = nyx_voice_client::Client::new("nyx-chat");
+    client.available().then_some(client)
+}
+
+/// Run one Nyx Voice call to completion on this (worker) thread.
+fn voice_call<T>(f: impl std::future::Future<Output = nyx_voice_client::Result<T>>) -> Result<T> {
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
+    runtime.block_on(f).map_err(|e| anyhow::anyhow!("{e}"))
 }
 
 fn bin(configured: &str, fallbacks: &[&str]) -> Option<String> {
@@ -24,7 +56,14 @@ fn bin(configured: &str, fallbacks: &[&str]) -> Option<String> {
 
 /// Why dictation can't run, if it can't.
 pub fn dictation_problem() -> Option<String> {
+    if nyx_voice().is_some() {
+        return None;
+    }
     let p = prefs::get();
+    let none = "Dictation uses Nyx Voice, which isn't running (it comes with Nyx Assistant), or whisper.cpp with a model chosen in Settings → Voice.";
+    if bin(&p.whisper_bin, &["whisper-cli", "whisper-cpp", "whisper"]).is_none() && p.whisper_model.trim().is_empty() {
+        return Some(none.into());
+    }
     if !cmd::present("pw-record") {
         return Some("Recording needs PipeWire's pw-record.".into());
     }
@@ -39,7 +78,13 @@ pub fn dictation_problem() -> Option<String> {
 
 /// Why reading aloud can't run, if it can't.
 pub fn speech_problem() -> Option<String> {
+    if nyx_voice().is_some() {
+        return None;
+    }
     let p = prefs::get();
+    if bin(&p.piper_bin, &["piper", "piper-tts"]).is_none() && p.piper_voice.trim().is_empty() {
+        return Some("Reading aloud uses Nyx Voice, which isn't running (it comes with Nyx Assistant), or Piper with a voice chosen in Settings → Voice.".into());
+    }
     if !cmd::present("pw-play") {
         return Some("Playback needs PipeWire's pw-play.".into());
     }
@@ -60,6 +105,15 @@ pub fn start_recording() -> Result<()> {
     if let Some(problem) = dictation_problem() {
         bail!("{problem}");
     }
+    if let Some(client) = nyx_voice() {
+        // Push to talk: the take runs until stop_and_transcribe says stop.
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::Builder::new().name("dictation".into()).spawn(move || {
+            let _ = tx.send(voice_call(client.listen_text(Mode::Dictation, Until::Stop)));
+        })?;
+        RECORDER.with(|r| *r.borrow_mut() = Some(Take::Voice(rx)));
+        return Ok(());
+    }
     let dir = paths::cache_dir().join("voice");
     std::fs::create_dir_all(&dir)?;
     let wav = dir.join("dictation.wav");
@@ -71,14 +125,32 @@ pub fn start_recording() -> Result<()> {
         .stderr(Stdio::null())
         .spawn()
         .context("couldn't start pw-record")?;
-    RECORDER.with(|r| *r.borrow_mut() = Some((child, wav)));
+    RECORDER.with(|r| *r.borrow_mut() = Some(Take::Local(child, wav)));
     Ok(())
 }
 
 pub fn stop_and_transcribe(done: impl FnOnce(Result<String>) + 'static) {
-    let Some((mut child, wav)) = RECORDER.with(|r| r.borrow_mut().take()) else {
-        done(Err(anyhow::anyhow!("not recording")));
-        return;
+    let (mut child, wav) = match RECORDER.with(|r| r.borrow_mut().take()) {
+        Some(Take::Local(child, wav)) => (child, wav),
+        Some(Take::Voice(transcript)) => {
+            cmd::background(
+                move || -> Result<String> {
+                    if let Some(client) = nyx_voice() {
+                        voice_call(client.stop_listening())?;
+                    }
+                    let text = transcript
+                        .recv_timeout(std::time::Duration::from_secs(60))
+                        .map_err(|_| anyhow::anyhow!("Nyx Voice didn't send the text"))??;
+                    Ok(text.trim().to_string())
+                },
+                done,
+            );
+            return;
+        }
+        None => {
+            done(Err(anyhow::anyhow!("not recording")));
+            return;
+        }
     };
     let p = prefs::get();
     let whisper = bin(&p.whisper_bin, &["whisper-cli", "whisper-cpp", "whisper"]).unwrap_or_default();
@@ -127,9 +199,13 @@ pub fn speaking() -> bool {
 }
 
 pub fn stop_speaking() {
-    if let Some(pid) = SPEAKER.with(|s| s.borrow_mut().take()) {
-        // SAFETY: plain syscall; the group was created for this playback only.
-        unsafe { libc::kill(-(pid as i32), libc::SIGTERM) };
+    match SPEAKER.with(|s| s.borrow_mut().take()) {
+        Some(Speech::Local(pid)) => {
+            // SAFETY: plain syscall; the group was created for this playback only.
+            unsafe { libc::kill(-(pid as i32), libc::SIGTERM) };
+        }
+        Some(Speech::Voice(_)) => cmd::background(|| nyx_voice().map(|client| voice_call(client.stop_speaking())), |_| {}),
+        None => {}
     }
 }
 
@@ -145,6 +221,28 @@ pub fn speak(markdown: &str) {
     }
     let text = crate::markdown::plain(markdown);
     if text.is_empty() {
+        return;
+    }
+    if let Some(client) = nyx_voice() {
+        let turn = TURN.with(|t| {
+            t.set(t.get() + 1);
+            t.get()
+        });
+        SPEAKER.with(|s| *s.borrow_mut() = Some(Speech::Voice(turn)));
+        let text: String = text.chars().take(nyx_voice_client::proto::MAX_SPEAK).collect();
+        cmd::background(
+            move || voice_call(client.speak(&text)),
+            move |result| {
+                SPEAKER.with(|s| {
+                    if *s.borrow() == Some(Speech::Voice(turn)) {
+                        *s.borrow_mut() = None;
+                    }
+                });
+                if let Err(e) = result {
+                    window::toast(&format!("Couldn't read it aloud: {e}"));
+                }
+            },
+        );
         return;
     }
     let p = prefs::get();
@@ -178,12 +276,12 @@ pub fn speak(markdown: &str) {
         let _ = stdin.write_all(text.as_bytes());
     }
     let pid = child.id();
-    SPEAKER.with(|s| *s.borrow_mut() = Some(pid));
+    SPEAKER.with(|s| *s.borrow_mut() = Some(Speech::Local(pid)));
     cmd::background(
         move || child.wait().map(|s| s.success()).unwrap_or(false),
         move |_| {
             SPEAKER.with(|s| {
-                if *s.borrow() == Some(pid) {
+                if *s.borrow() == Some(Speech::Local(pid)) {
                     *s.borrow_mut() = None;
                 }
             });

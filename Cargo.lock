@@ -1592,6 +1592,7 @@ dependencies = [
  "nyx-core",
  "nyx-theme",
  "nyx-ui",
+ "nyx-voice-client",
  "pulldown-cmark",
  "reqwest",
  "rusqlite",
@@ -1694,6 +1695,26 @@ dependencies = [
  "nyx-theme",
  "serde_json",
  "toml",
+]
+
+[[package]]
+name = "nyx-voice-client"
+version = "0.1.0"
+source = "git+https://github.com/design-nexus/nyx-voice.git?rev=1d55293be9eba0af8eaff531f74b29d298144a00#1d55293be9eba0af8eaff531f74b29d298144a00"
+dependencies = [
+ "libc",
+ "nyx-voice-proto",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "nyx-voice-proto"
+version = "0.1.0"
+source = "git+https://github.com/design-nexus/nyx-voice.git?rev=1d55293be9eba0af8eaff531f74b29d298144a00#1d55293be9eba0af8eaff531f74b29d298144a00"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

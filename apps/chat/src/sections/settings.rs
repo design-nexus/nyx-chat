@@ -915,7 +915,9 @@ fn file_row(g: &Group, title: &str, desc: &str, value: &str, set: fn(&mut prefs:
 
 fn voice_group(page: &Page) {
     let g = page.group("Voice");
-    g.note("Speech stays on this computer: whisper.cpp listens and Piper speaks.");
+    g.note(
+        "Speech stays on this computer. Nyx Voice listens and speaks when it's running; otherwise whisper.cpp and Piper, set up below.",
+    );
     let status = widgets::vbox(6);
     g.add(&status);
     let refresh = {
