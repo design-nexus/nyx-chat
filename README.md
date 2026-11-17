@@ -1,8 +1,8 @@
 # Chat
 
 A desktop chat client for [Nyx AI Core](https://github.com/design-nexus/nyx-ai) (the suite's shared llama.cpp runtime) and optional [Ollama](https://ollama.com), built with GTK 4. It chats with
-local models, lets them use tools such as web search, and downloads GGUF models from Hugging Face. It takes its colors
-from your [Omarchy](https://omarchy.org) theme and fits a half-screen tile.
+local models, lets them use tools such as web search, and downloads GGUF models from Hugging Face. It follows the
+system theme (NyxOS's or [Omarchy](https://omarchy.org)'s) and fits a half-screen tile.
 
 Chat uses Nyx AI Core on this computer by default. It loads, schedules and downloads models for every Nyx app; Chat keeps its own chats, prompts and knowledge bases.
 
