@@ -197,6 +197,8 @@ pub async fn set_default_chat_model(model: &str) -> Result<()> {
             model_updates: None,
             defaults: Some(defaults),
             battery_saver: None,
+            add_model_dirs: None,
+            openai: None,
         })
         .await
         .map_err(fail)?;

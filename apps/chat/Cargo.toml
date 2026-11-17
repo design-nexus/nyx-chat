@@ -12,13 +12,13 @@ name = "nyx-chat"
 path = "src/main.rs"
 
 [dependencies]
-nyx-core = { git = "https://github.com/design-nexus/nyx-core.git", rev = "94e0c8aa133074c74adb31365e51f56168114f68" }
-nyx-ui = { git = "https://github.com/design-nexus/nyx-design.git", rev = "ea8839d237a23ec83887429475f0780c06a36826" }
-nyx-theme = { git = "https://github.com/design-nexus/nyx-design.git", rev = "ea8839d237a23ec83887429475f0780c06a36826" }
-nyx-ai-client = { git = "https://github.com/design-nexus/nyx-ai.git", rev = "da5b6f64fb2af00db57af7f572f3bea378441f1c" }
+nyx-core = { git = "https://github.com/design-nexus/nyx-core.git", rev = "a258c315f056ac649586fdb55e98613056221411" }
+nyx-ui = { git = "https://github.com/design-nexus/nyx-design.git", rev = "914b14ec5574ca04cbb985b571cfbfb0a42aae15" }
+nyx-theme = { git = "https://github.com/design-nexus/nyx-design.git", rev = "914b14ec5574ca04cbb985b571cfbfb0a42aae15" }
+nyx-ai-client = { git = "https://github.com/design-nexus/nyx-ai.git", rev = "277b9a5b11fead7850bc8ce68ddc57f08c09f983" }
 anyhow = "1"
 async-channel = "2"
-nyx-voice-client = { git = "https://github.com/design-nexus/nyx-voice.git", rev = "1d55293be9eba0af8eaff531f74b29d298144a00" }
+nyx-voice-client = { git = "https://github.com/design-nexus/nyx-voice.git", rev = "81fb1e556e40381e479e81fa1c1c32a372fa7fd8" }
 base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 futures-util = "0.3"
