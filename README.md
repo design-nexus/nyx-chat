@@ -92,6 +92,8 @@ while the GPU is already awake.
 
 ## Install
 
+On NyxOS, choose Chat in Welcome when you set up, or install it later from the Store or with `nyx install nyx-chat`. On Omarchy:
+
 ```sh
 curl -fsSL https://raw.githubusercontent.com/design-nexus/nyx-chat/main/install.sh | bash -s -- chat
 ```
